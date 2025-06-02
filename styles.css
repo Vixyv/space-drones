@@ -1,0 +1,18 @@
+html, body {
+    height: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+#canvas_div {
+    height: 100%;
+}
+
+#canvas {
+    margin: 0;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    
+    outline: 2px solid black;
+}
