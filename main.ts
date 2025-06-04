@@ -36,6 +36,7 @@ class RGB {
 
 class Camera {
     pos: Vector2;
+    get offset() { return new Vector2(window.innerWidth*0.5, window.innerHeight*0.5).add(new Vector2(this.pos.x, -this.pos.y)) };
     distance: number;
 
     constructor(pos: Vector2, distance: number) {
@@ -50,16 +51,18 @@ class Camera {
 
 class Polygon {
     points: Vector2[];
+    colour: RGB;
 
-    constructor(points: Vector2[]) {
+    constructor(points: Vector2[], colour: RGB) {
         this.points = points;
+        this.colour = colour;
     }
 
     transform(rot: number, scale: Vector2, pos: Vector2) : Vector2[] {
         let transformed_points = [];
 
-        let rot_matrix = [[Math.cos(rot), Math.sin(rot)], 
-                          [-Math.sin(rot), Math.cos(rot)]];
+        let rot_matrix = [[Math.cos(rot), -Math.sin(rot)], 
+                          [Math.sin(rot), Math.cos(rot)]];
 
         for (let point=0; point<this.points.length; point++) {
             transformed_points.push(this.points[point].matrix_mult(rot_matrix).scale(scale).add(pos));
@@ -67,31 +70,46 @@ class Polygon {
 
         return transformed_points
     }
+
+    draw(camera: Camera, object: WorldObj) {
+        let t_points = this.transform(object.rot, object.scale, object.pos.add(camera.offset));
+
+        ctx.strokeStyle = this.colour.toStr();
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(t_points[0].x/camera.distance, t_points[0].y/camera.distance);
+        for (let point=1; point<t_points.length; point++) {
+            ctx.lineTo(t_points[point].x/camera.distance, t_points[point].y/camera.distance);
+        }
+        ctx.closePath();
+        ctx.stroke();
+    }
 }
 
 // World Objects
 class WorldObj {
-    pos: Vector2;            // Relative to world origin, -y up, +x right, (x, y)
-    rot = 0; // Based on unit cicle, 0 = facing right 
+    pos: Vector2; // Relative to world origin, -y up, +x right, (x, y)
+    rot = 0;      // Based on unit cicle, 0 = facing right 
     scale = new Vector2(1, 1);
-    collision = this.scale;  // Bounds around pos (+ and -), collision box
-    polygon = new Polygon([]);
+    collision = this.scale; // Bounds around pos (+ and -), collision box
+    polygon = new Polygon([], new RGB(255, 255, 255));
 
-    constructor(pos: Vector2, rot?: number, scale?: Vector2, collision?: Vector2) {
+    constructor(pos: Vector2, rot?: number, scale?: Vector2, collision?: Vector2, polygon?: Polygon) {
         this.pos = pos;
         this.rot = rot == undefined ? this.rot : rot;
         this.scale = scale == undefined ? this.scale : scale;
         this.collision = collision == undefined ? this.collision : collision;
+        this.polygon = polygon == undefined ? this.polygon : polygon;
     }
 
     // Uses canvas drawing options, manages drawing itself
     // Always from the perspective of the object facing right
-    draw(scale: number) {} 
+    draw(camera: Camera) {} 
 }
 
 
 class Drone extends WorldObj {
-    colour = new RGB(255, 255, 255);
     max_health: number;
     health: number;
     health_bar = new HealthBar(1, this.pos.add(new Vector2(0, 1)), this.scale);
@@ -104,21 +122,15 @@ class Drone extends WorldObj {
         this.polygon.points = [
             new Vector2(10, 0),
             new Vector2(-5, 5),
-            new Vector2(5, 5),
+            new Vector2(-5, -5),
         ]
     }
 
-    draw(scale: number) {
-        ctx.fillStyle = this.colour.toStr();
+    draw(camera: Camera) {
+        this.polygon.draw(camera, this);
+        this.health_bar.draw(camera);
 
-        let points = this.polygon.transform(this.rot, this.scale, this.pos);
-
-        ctx.beginPath();
-        ctx.moveTo(points[0].x/scale, points[0].y/scale);
-        for (let point=1; point<points.length; point++) {
-            ctx.lineTo(points[point].x/scale, points[point].y/scale);
-        }
-        ctx.fill();
+        console.log("getting called")
     }
 
     // Add changes to health
@@ -154,7 +166,7 @@ class UI {
         this.size = size;
     }
 
-    draw(scale: number) {}
+    draw(camera: Camera) {}
 }
 
 class HealthBar extends UI {
@@ -165,7 +177,7 @@ class HealthBar extends UI {
         this.value = value;
     }
 
-    draw(scale: number) {
+    draw(camera: Camera) {
         if (this.value == 1) { return }
     }
 }
@@ -197,11 +209,11 @@ function render() {
     draw_background()
 
     for (let obj=0; obj<world_objects.length; obj++) {
-        world_objects[obj].draw(camera.distance);
+        world_objects[obj].draw(camera);
     }
 
     for (let obj=0; obj<ui_objects.length; obj++) {
-        ui_objects[obj].draw(camera.distance);
+        ui_objects[obj].draw(camera);
     }
 }
 
@@ -229,7 +241,7 @@ let world_objects: WorldObj[] = [];
 let ui_objects: UI[] = [];
 
 function init_world() {
-
+    world_objects.push(new Drone(100, new Vector2(0, 0), 0, new Vector2(10, 10)))
 }
 
 function init_input() {
@@ -257,6 +269,8 @@ async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     last_animation_frame = timestamp;
 
     if (execute) {
+        console.log("executing")
+
         render()
 
         requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, false));
