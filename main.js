@@ -149,6 +149,7 @@ function smoothstep(edge_0, edge_1, x) {
 // - Render Pipeline - //
 function draw_background() {
     ctx.fillStyle = "rgb(14, 12, 46)";
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     ctx.beginPath();
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 }

@@ -203,6 +203,7 @@ function smoothstep(edge_0: number, edge_1: number, x: number) : number {
 function draw_background() {
     ctx.fillStyle = "rgb(14, 12, 46)";
 
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     ctx.beginPath();
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 }
