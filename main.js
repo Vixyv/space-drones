@@ -59,7 +59,7 @@ class Polygon {
     draw(camera, object) {
         let t_points = this.transform(object.rot, object.scale.scale(new Vector2(1 / camera.distance, 1 / camera.distance)), object.pos.add(camera.offset));
         ctx.strokeStyle = this.colour.toStr();
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(t_points[0].x, t_points[0].y);
         for (let point = 1; point < t_points.length; point++) {
@@ -68,18 +68,21 @@ class Polygon {
         ctx.closePath();
         ctx.stroke();
     }
+    // Checks if a given point is within a polygon
+    point_in_polygon(point, camera, object) {
+        let t_points = this.transform(object.rot, object.scale.scale(new Vector2(1 / camera.distance, 1 / camera.distance)), object.pos.add(camera.offset));
+        return false;
+    }
 }
 // World Objects
 class WorldObj {
-    constructor(pos, rot, scale, collision, polygon) {
+    constructor(pos, rot, scale, polygon) {
         this.rot = 0; // Based on unit cicle, 0 = facing right
         this.scale = new Vector2(1, 1);
-        this.collision = this.scale; // Bounds around pos (+ and -), collision box
         this.polygon = new Polygon([], new RGB(255, 255, 255));
         this.pos = pos;
         this.rot = rot == undefined ? this.rot : rot;
         this.scale = scale == undefined ? this.scale : scale;
-        this.collision = collision == undefined ? this.collision : collision;
         this.polygon = polygon == undefined ? this.polygon : polygon;
     }
     // Uses canvas drawing options, manages drawing itself
@@ -87,7 +90,7 @@ class WorldObj {
     draw(camera) { }
 }
 class Drone extends WorldObj {
-    constructor(max_health, pos, rot, scale, collision) {
+    constructor(max_health, pos, rot, scale) {
         super(pos, rot, scale);
         this.health_bar = new HealthBar(1, this.pos.add(new Vector2(0, 1)), this.scale);
         this.max_health = max_health;
@@ -100,17 +103,31 @@ class Drone extends WorldObj {
     }
     draw(camera) {
         this.polygon.draw(camera, this);
-        this.health_bar.draw(camera);
+        this.health_bar.draw(camera, this);
     }
-    // Add changes to health
+    // Adds change to health
     update_health(change) {
         this.health += change;
         this.health_bar.value = (this.health / this.max_health);
     }
+    // Rotates to a position
+    look_at(pos) { }
+    // Smoothly moves to a position
+    move_to(pos) { }
+    // Called every frame and tells the drone to do something (attack, move, etc.)
+    do() { }
 }
 class CaptainDrone extends Drone {
+    constructor(max_health, pos, rot) {
+        super(max_health, pos, rot, new Vector2(2, 2));
+        this.polygon.colour = new RGB(94, 140, 247);
+    }
 }
 class SoldierDrone extends Drone {
+    constructor(max_health, pos, rot) {
+        super(max_health, pos, rot, new Vector2(2, 2));
+        this.polygon.colour = new RGB(94, 140, 247);
+    }
 }
 class EnemyDrone extends Drone {
 }
@@ -124,15 +141,25 @@ class UI {
     }
     draw(camera) { }
 }
-class HealthBar extends UI {
+class LinkedUI {
+    constructor(offset, size) {
+        this.offset = offset;
+        this.size = size;
+    }
+    draw(camera, object) { }
+}
+// TODO: Draw healthbar
+class HealthBar extends LinkedUI {
     constructor(value, pos, size) {
         super(pos, size);
         this.value = value;
     }
-    draw(camera) {
+    draw(camera, object) {
         if (this.value == 1) {
             return;
         }
+    }
+    update_pos(object) {
     }
 }
 // - Constants - //
@@ -179,7 +206,7 @@ let camera = new Camera(new Vector2(0, 0), 1);
 let world_objects = [];
 let ui_objects = [];
 function init_world() {
-    world_objects.push(new Drone(100, new Vector2(0, 0), 0, new Vector2(10, 10)));
+    world_objects.push(new Drone(100, new Vector2(0, 0), 0, new Vector2(2, 2)));
 }
 function init_input() {
 }
