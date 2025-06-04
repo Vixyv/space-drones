@@ -15,10 +15,11 @@ class Vector2 {
         this.y = y;
     }
     add(vector) { return new Vector2(this.x + vector.x, this.y + vector.y); }
+    minus(vector) { return new Vector2(this.x - vector.x, this.y - vector.y); }
     scale(vector) { return new Vector2(this.x * vector.x, this.y * vector.y); }
     // Row major
     matrix_mult(matrix) {
-        return new Vector2(this.x * matrix[0][0] + this.y * matrix[0][1], this.x * matrix[1][1] + this.y * matrix[1][1]);
+        return new Vector2(this.x * matrix[0][0] + this.y * matrix[0][1], this.x * matrix[1][0] + this.y * matrix[1][1]);
     }
 }
 class RGB {
@@ -30,7 +31,7 @@ class RGB {
     toStr() { return `rgb(${this.r}, ${this.g}, ${this.b})`; }
 }
 class Camera {
-    get offset() { return new Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5).add(new Vector2(this.pos.x, -this.pos.y)); }
+    get offset() { return new Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5).minus(this.pos); }
     ;
     constructor(pos, distance) {
         this.pos = pos;
@@ -47,21 +48,22 @@ class Polygon {
     }
     transform(rot, scale, pos) {
         let transformed_points = [];
-        let rot_matrix = [[Math.cos(rot), -Math.sin(rot)],
-            [Math.sin(rot), Math.cos(rot)]];
+        rot *= DEG_TO_RAD;
+        let rot_matrix = [[Math.cos(rot), Math.sin(rot)],
+            [-Math.sin(rot), Math.cos(rot)]];
         for (let point = 0; point < this.points.length; point++) {
             transformed_points.push(this.points[point].matrix_mult(rot_matrix).scale(scale).add(pos));
         }
         return transformed_points;
     }
     draw(camera, object) {
-        let t_points = this.transform(object.rot, object.scale, object.pos.add(camera.offset));
+        let t_points = this.transform(object.rot, object.scale.scale(new Vector2(1 / camera.distance, 1 / camera.distance)), object.pos.add(camera.offset));
         ctx.strokeStyle = this.colour.toStr();
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(t_points[0].x / camera.distance, t_points[0].y / camera.distance);
+        ctx.moveTo(t_points[0].x, t_points[0].y);
         for (let point = 1; point < t_points.length; point++) {
-            ctx.lineTo(t_points[point].x / camera.distance, t_points[point].y / camera.distance);
+            ctx.lineTo(t_points[point].x, t_points[point].y);
         }
         ctx.closePath();
         ctx.stroke();
@@ -70,7 +72,7 @@ class Polygon {
 // World Objects
 class WorldObj {
     constructor(pos, rot, scale, collision, polygon) {
-        this.rot = 0; // Based on unit cicle, 0 = facing right 
+        this.rot = 0; // Based on unit cicle, 0 = facing right
         this.scale = new Vector2(1, 1);
         this.collision = this.scale; // Bounds around pos (+ and -), collision box
         this.polygon = new Polygon([], new RGB(255, 255, 255));
@@ -99,7 +101,6 @@ class Drone extends WorldObj {
     draw(camera) {
         this.polygon.draw(camera, this);
         this.health_bar.draw(camera);
-        console.log("getting called");
     }
     // Add changes to health
     update_health(change) {
@@ -134,6 +135,8 @@ class HealthBar extends UI {
         }
     }
 }
+// - Constants - //
+const DEG_TO_RAD = Math.PI / 180;
 // - Tool Functions - //
 function clamp(min, max, x) {
     return Math.max(min, Math.min(x, max));
@@ -189,14 +192,17 @@ let unpaused = false;
 let execute = true;
 let last_animation_frame = 0;
 let delta = 0; // Represents the amount of time since the last animation frame
+let val = 0;
 function process(timestamp, unpaused) {
     return __awaiter(this, void 0, void 0, function* () {
         // Unpaused is true if the engine was just unpaused (stoped and then started again)
         delta = unpaused ? 0 : (timestamp - last_animation_frame) * 0.1;
         last_animation_frame = timestamp;
         if (execute) {
-            console.log("executing");
             render();
+            world_objects[0].rot += delta * 0.8;
+            world_objects[0].pos.y = 200 * Math.cos(val);
+            val += delta * 0.03;
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
         else {

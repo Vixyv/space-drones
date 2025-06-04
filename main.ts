@@ -10,12 +10,13 @@ class Vector2 {
     }
 
     add(vector: Vector2) { return new Vector2(this.x+vector.x, this.y+vector.y) }
+    minus(vector: Vector2) { return new Vector2(this.x-vector.x, this.y-vector.y) }
     scale(vector: Vector2) { return new Vector2(this.x*vector.x, this.y*vector.y) }
     // Row major
     matrix_mult(matrix: number[][]) {
         return new Vector2(
             this.x*matrix[0][0] + this.y*matrix[0][1],
-            this.x*matrix[1][1] + this.y*matrix[1][1],
+            this.x*matrix[1][0] + this.y*matrix[1][1],
         )
     }
 }
@@ -36,8 +37,8 @@ class RGB {
 
 class Camera {
     pos: Vector2;
-    get offset() { return new Vector2(window.innerWidth*0.5, window.innerHeight*0.5).add(new Vector2(this.pos.x, -this.pos.y)) };
     distance: number;
+    get offset() { return new Vector2(window.innerWidth*0.5, window.innerHeight*0.5).minus(this.pos) };
 
     constructor(pos: Vector2, distance: number) {
         this.pos = pos;
@@ -61,8 +62,9 @@ class Polygon {
     transform(rot: number, scale: Vector2, pos: Vector2) : Vector2[] {
         let transformed_points = [];
 
-        let rot_matrix = [[Math.cos(rot), -Math.sin(rot)], 
-                          [Math.sin(rot), Math.cos(rot)]];
+        rot *= DEG_TO_RAD;
+        let rot_matrix = [[Math.cos(rot), Math.sin(rot)], 
+                          [-Math.sin(rot), Math.cos(rot)]];
 
         for (let point=0; point<this.points.length; point++) {
             transformed_points.push(this.points[point].matrix_mult(rot_matrix).scale(scale).add(pos));
@@ -72,15 +74,15 @@ class Polygon {
     }
 
     draw(camera: Camera, object: WorldObj) {
-        let t_points = this.transform(object.rot, object.scale, object.pos.add(camera.offset));
+        let t_points = this.transform(object.rot, object.scale.scale(new Vector2(1/camera.distance, 1/camera.distance)), object.pos.add(camera.offset));
 
         ctx.strokeStyle = this.colour.toStr();
         ctx.lineWidth = 3;
 
         ctx.beginPath();
-        ctx.moveTo(t_points[0].x/camera.distance, t_points[0].y/camera.distance);
+        ctx.moveTo(t_points[0].x, t_points[0].y);
         for (let point=1; point<t_points.length; point++) {
-            ctx.lineTo(t_points[point].x/camera.distance, t_points[point].y/camera.distance);
+            ctx.lineTo(t_points[point].x, t_points[point].y);
         }
         ctx.closePath();
         ctx.stroke();
@@ -90,7 +92,7 @@ class Polygon {
 // World Objects
 class WorldObj {
     pos: Vector2; // Relative to world origin, -y up, +x right, (x, y)
-    rot = 0;      // Based on unit cicle, 0 = facing right 
+    rot = 0;      // Based on unit cicle, 0 = facing right
     scale = new Vector2(1, 1);
     collision = this.scale; // Bounds around pos (+ and -), collision box
     polygon = new Polygon([], new RGB(255, 255, 255));
@@ -107,7 +109,6 @@ class WorldObj {
     // Always from the perspective of the object facing right
     draw(camera: Camera) {} 
 }
-
 
 class Drone extends WorldObj {
     max_health: number;
@@ -129,8 +130,6 @@ class Drone extends WorldObj {
     draw(camera: Camera) {
         this.polygon.draw(camera, this);
         this.health_bar.draw(camera);
-
-        console.log("getting called")
     }
 
     // Add changes to health
@@ -181,6 +180,9 @@ class HealthBar extends UI {
         if (this.value == 1) { return }
     }
 }
+
+// - Constants - //
+const DEG_TO_RAD = Math.PI/180;
 
 // - Tool Functions - //
 
@@ -263,15 +265,19 @@ let execute = true;
 let last_animation_frame = 0;
 let delta = 0; // Represents the amount of time since the last animation frame
 
+let val = 0;
+
 async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     // Unpaused is true if the engine was just unpaused (stoped and then started again)
     delta = unpaused ? 0 : (timestamp - last_animation_frame)*0.1;
     last_animation_frame = timestamp;
 
     if (execute) {
-        console.log("executing")
-
         render()
+
+        world_objects[0].rot += delta*0.8;
+        world_objects[0].pos.y = 200*Math.cos(val);
+        val += delta*0.03;
 
         requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, false));
     } else {
