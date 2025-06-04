@@ -102,6 +102,7 @@ class WorldObj {
     rot = 0;      // Based on unit cicle, 0 = facing right
     scale = new Vector2(1, 1);
     polygon = new Polygon([], new RGB(255, 255, 255));
+    animator = new Animator();
 
     constructor(pos: Vector2, rot?: number, scale?: Vector2, polygon?: Polygon) {
         this.pos = pos;
@@ -144,7 +145,21 @@ class Drone extends WorldObj {
     }
 
     // Rotates to a position
-    look_at(pos: Vector2) {}
+    look_at(pos: Vector2) {
+        let dif = pos.minus(this.pos);
+
+        let desired_rot = 0;
+
+        if (dif.x > 0) {
+            desired_rot = RAD_TO_DEG*Math.atan(-dif.y/dif.x);
+        } else if (dif.x < 0) {
+            desired_rot = 180+(RAD_TO_DEG*Math.atan(dif.y/dif.x));
+        } else {
+            desired_rot = -90*Math.sin(dif.y);
+        }
+
+        // TODO: Create animator and animation for rotation (lerp)
+    }
 
     // Smoothly moves to a position
     move_to(pos: Vector2) {}
@@ -220,6 +235,7 @@ class HealthBar extends LinkedUI {
 
 // - Constants - //
 const DEG_TO_RAD = Math.PI/180;
+const RAD_TO_DEG = 180/Math.PI;
 
 // - Tool Functions - //
 
@@ -227,13 +243,63 @@ function clamp(min: number, max: number, x: number) : number {
     return Math.max(min, Math.min(x, max))
 }
 
+// Interpolation functions
+function lerp(a: number, b: number, x: number) : number {
+    return a + x*(b-a)
+}
+
 // From https://en.wikipedia.org/wiki/Smoothstep
-function smoothstep(edge_0: number, edge_1: number, x: number) : number {
-    x = clamp(0, 1, (x-edge_0)/(edge_1-edge_0));
+function smoothstep(a: number, b: number, x: number) : number {
+    x = clamp(0, 1, (x-a)/(b-a));
 
     return x*x*(3-2*x)
 }
 
+
+// - Animation - //
+
+class Animator {
+    active_animations: Anim[] = [];
+
+    constructor() {}
+
+    add_animation(animation: Anim) {
+        this.active_animations.push(animation)
+    }
+
+    animate(delta: number) {
+        for (let anim=0; anim<this.active_animations.length; anim++) {
+            this.active_animations[anim].step(delta);
+        }
+    }
+}
+
+// Name "Animation" already in use by typescript
+class Anim {
+    start: number;
+    end: number;
+    duration: number; // Duration of the animation in seconds
+    interp = lerp; // Default interp function is lerp
+
+    constructor(start: number, end: number, duration: number, interp?: (a: number, b: number, x: number) => number) {
+        this.start = start;
+        this.end = end;
+        this.duration = duration;
+        this.interp = interp == undefined ? this.interp : interp;
+    }
+
+    // Step the animation forward
+    step(delta: number) {
+        // TODO
+    }
+}
+
+// Triggers all objects to animate
+function animate(delta: number) {
+    for (let obj=0; obj<world_objects.length; obj++) {
+        world_objects[obj].animator.animate(delta);
+    }
+}
 
 // - Render Pipeline - //
 
@@ -311,11 +377,8 @@ async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     last_animation_frame = timestamp;
 
     if (execute) {
+        animate(delta)
         render()
-
-        world_objects[0].rot += delta*0.8;
-        world_objects[0].pos.y = 200*Math.cos(val);
-        val += delta*0.03;
 
         requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, false));
     } else {
