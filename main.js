@@ -1,5 +1,6 @@
 "use strict";
 // - Classes - //
+// Animation classes are under // - Animation - //
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -9,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+// Tool classes
 class Vector2 {
     constructor(x, y) {
         this.x = x;
@@ -16,11 +18,14 @@ class Vector2 {
     }
     add(vector) { return new Vector2(this.x + vector.x, this.y + vector.y); }
     minus(vector) { return new Vector2(this.x - vector.x, this.y - vector.y); }
-    scale(vector) { return new Vector2(this.x * vector.x, this.y * vector.y); }
+    scale(scalar) { return new Vector2(this.x * scalar, this.y * scalar); }
+    vec_scale(vector) { return new Vector2(this.x * vector.x, this.y * vector.y); }
     // Row major
     matrix_mult(matrix) {
         return new Vector2(this.x * matrix[0][0] + this.y * matrix[0][1], this.x * matrix[1][0] + this.y * matrix[1][1]);
     }
+    // Used for printing with console.log()
+    debug() { return [this.x, this.y]; }
 }
 class RGB {
     constructor(red, green, blue) {
@@ -30,17 +35,7 @@ class RGB {
     }
     toStr() { return `rgb(${this.r}, ${this.g}, ${this.b})`; }
 }
-class Camera {
-    get offset() { return new Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5).minus(this.pos); }
-    ;
-    constructor(pos, distance) {
-        this.pos = pos;
-        this.distance = distance;
-    }
-    zoom(mult) {
-        this.distance *= mult;
-    }
-}
+// World object classes
 class Polygon {
     constructor(points, colour) {
         this.points = points;
@@ -52,12 +47,12 @@ class Polygon {
         let rot_matrix = [[Math.cos(rot), Math.sin(rot)],
             [-Math.sin(rot), Math.cos(rot)]];
         for (let point = 0; point < this.points.length; point++) {
-            transformed_points.push(this.points[point].matrix_mult(rot_matrix).scale(scale).add(pos));
+            transformed_points.push(this.points[point].matrix_mult(rot_matrix).vec_scale(scale).add(pos));
         }
         return transformed_points;
     }
     draw(camera, object) {
-        let t_points = this.transform(object.rot, object.scale.scale(new Vector2(1 / camera.distance, 1 / camera.distance)), object.pos.add(camera.offset));
+        let t_points = this.transform(object.rot, object.scale.vec_scale(new Vector2(1 / camera.distance, 1 / camera.distance)), object.pos.add(camera.offset));
         ctx.strokeStyle = this.colour.toStr();
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -70,14 +65,13 @@ class Polygon {
     }
     // Checks if a given point is within a polygon
     point_in_polygon(point, camera, object) {
-        let t_points = this.transform(object.rot, object.scale.scale(new Vector2(1 / camera.distance, 1 / camera.distance)), object.pos.add(camera.offset));
+        let t_points = this.transform(object.rot, object.scale.scale(1 / camera.distance), object.pos.add(camera.offset));
         return false;
     }
 }
-// World Objects
 class WorldObj {
     constructor(pos, rot, scale, polygon) {
-        this.rot = 0; // Based on unit cicle, 0 = facing right
+        this.rot = 0; // Based on unit cicle, 0 = facing right, degrees
         this.scale = new Vector2(1, 1);
         this.polygon = new Polygon([], new RGB(255, 255, 255));
         this.animator = new Animator();
@@ -86,9 +80,42 @@ class WorldObj {
         this.scale = scale == undefined ? this.scale : scale;
         this.polygon = polygon == undefined ? this.polygon : polygon;
     }
-    // Uses canvas drawing options, manages drawing itself
+    // Rotates to a position (default = lerp)
+    look_at(pos, duration, interp) {
+        interp = interp == undefined ? lerp : interp;
+        let dif = this.pos.minus(pos);
+        let desired_rot = Math.atan2(-dif.y, dif.x) * RAD_TO_DEG;
+        let rot_dif = desired_rot - this.rot;
+        // Prevents snapping (by making desired_rot the shortest path)
+        if (rot_dif > 180) {
+            this.rot += 360;
+        }
+        else if (rot_dif < -180) {
+            this.rot -= 360;
+        }
+        this.animator.add_anim(new Anim((value) => { this.rot = value; }, "rotate", this.rot, desired_rot, duration, interp));
+    }
+    // Moves to a position (default = smoothstep)
+    move_to(pos, duration, interp) {
+        interp = interp == undefined ? smoothstep : interp;
+        this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, pos.x, duration, interp));
+        this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, pos.y, duration, interp));
+    }
     // Always from the perspective of the object facing right
-    draw(camera) { }
+    draw(camera) {
+        this.polygon.draw(camera, this);
+    }
+}
+class Camera extends WorldObj {
+    get offset() { return new Vector2(canvas_size.x * 0.5, canvas_size.y * 0.5).minus(this.pos); }
+    ;
+    constructor(pos, distance) {
+        super(pos);
+        this.distance = distance;
+    }
+    zoom(mult) {
+        this.distance *= mult;
+    }
 }
 class Drone extends WorldObj {
     constructor(max_health, pos, rot, scale) {
@@ -111,23 +138,6 @@ class Drone extends WorldObj {
         this.health += change;
         this.health_bar.value = (this.health / this.max_health);
     }
-    // Rotates to a position
-    look_at(pos) {
-        let dif = pos.minus(this.pos);
-        let desired_rot = 0;
-        if (dif.x > 0) {
-            desired_rot = RAD_TO_DEG * Math.atan(-dif.y / dif.x);
-        }
-        else if (dif.x < 0) {
-            desired_rot = 180 + (RAD_TO_DEG * Math.atan(dif.y / dif.x));
-        }
-        else {
-            desired_rot = -90 * Math.sin(dif.y);
-        }
-        // TODO: Create animator and animation for rotation (lerp)
-    }
-    // Smoothly moves to a position
-    move_to(pos) { }
     // Called every frame and tells the drone to do something (attack, move, etc.)
     execute() { }
 }
@@ -179,45 +189,71 @@ class HealthBar extends LinkedUI {
 // - Constants - //
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
+const MILLI_TO_SEC = 0.001;
 // - Tool Functions - //
 function clamp(min, max, x) {
     return Math.max(min, Math.min(x, max));
 }
-// Interpolation functions
-function lerp(a, b, x) {
-    return a + x * (b - a);
+// Interpolation functions (t's range is 0->1)
+function lerp(a, b, t) {
+    return a + t * (b - a);
 }
 // From https://en.wikipedia.org/wiki/Smoothstep
-function smoothstep(a, b, x) {
-    x = clamp(0, 1, (x - a) / (b - a));
-    return x * x * (3 - 2 * x);
+function smoothstep(a, b, t) {
+    return a + (t * t * (3 - 2 * t)) * (b - a);
 }
 // - Animation - //
 class Animator {
     constructor() {
-        this.active_animations = [];
+        this.active_anims = [];
     }
-    add_animation(animation) {
-        this.active_animations.push(animation);
+    add_anim(anim) {
+        this.remove_anim(anim.name); // Ensures there are no duplicate animations
+        this.active_anims.push(anim);
     }
+    remove_anim(name) {
+        let anim_index = this.active_anims.findIndex((anim) => anim.name == name);
+        if (anim_index != -1) {
+            this.active_anims.splice(anim_index, 1);
+        }
+    }
+    // Returns a reference to an animation
+    find_anim(name) {
+        return this.active_anims.find((anim) => anim.name == name);
+    }
+    // Steps (forward) all animations and removes them if they are completed
     animate(delta) {
-        for (let anim = 0; anim < this.active_animations.length; anim++) {
-            this.active_animations[anim].step(delta);
+        for (let anim = 0; anim < this.active_anims.length; anim++) {
+            if (this.active_anims[anim].step(delta)) {
+                this.remove_anim(this.active_anims[anim].name);
+            }
+            ;
         }
     }
 }
 // Name "Animation" already in use by typescript
+// Animates a value (from start to target over a fixed duration)
 class Anim {
-    constructor(start, end, duration, interp) {
+    constructor(set_value, name, start, target, duration, interp) {
+        this.elapsed = 0; // Elapsed time of the animation in seconds
+        this.completed = false;
         this.interp = lerp; // Default interp function is lerp
+        this.set_value = set_value;
+        this.name = name;
         this.start = start;
-        this.end = end;
-        this.duration = duration;
+        this.target = target;
+        this.duration = duration <= 0 ? Number.MIN_VALUE : duration;
         this.interp = interp == undefined ? this.interp : interp;
     }
-    // Step the animation forward
+    // Step the animation forward (returns true will completed)
     step(delta) {
-        // TODO
+        this.elapsed += delta * MILLI_TO_SEC;
+        if (this.elapsed >= this.duration) {
+            this.elapsed = this.duration;
+            this.completed = true;
+        }
+        this.set_value(this.interp(this.start, this.target, this.elapsed / this.duration));
+        return this.completed;
     }
 }
 // Triggers all objects to animate
@@ -229,9 +265,9 @@ function animate(delta) {
 // - Render Pipeline - //
 function draw_background() {
     ctx.fillStyle = "rgb(14, 12, 46)";
-    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.clearRect(0, 0, canvas_size.x, canvas_size.y);
     ctx.beginPath();
-    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    ctx.fillRect(0, 0, canvas_size.x, canvas_size.y);
 }
 function render() {
     draw_background();
@@ -242,26 +278,68 @@ function render() {
         ui_objects[obj].draw(camera);
     }
 }
+// - Input - //
+const MOVE_SPEED = 50;
+// Allows for multiple keys to be pressed at once
+// Derived from (https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7)
+const KEYBOARD_CONTROLLER = {
+    // Camera movement
+    "ArrowUp": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, -1 * MOVE_SPEED)), 0) }, // Up
+    "ArrowDown": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(-1 * MOVE_SPEED, 0)), 0) }, // Left
+    "ArrowLeft": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, 1 * MOVE_SPEED)), 0) }, // Down
+    "ArrowRight": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(1 * MOVE_SPEED, 0)), 0) }, // Right
+    "w": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, -1 * MOVE_SPEED)), 0) }, // Up
+    "a": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(-1 * MOVE_SPEED, 0)), 0) }, // Left
+    "s": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, 1 * MOVE_SPEED)), 0) }, // Down
+    "d": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(1 * MOVE_SPEED, 0)), 0) }, // Right
+};
+function activate_inputs() {
+    Object.keys(KEYBOARD_CONTROLLER).forEach(key => {
+        KEYBOARD_CONTROLLER[key].pressed && KEYBOARD_CONTROLLER[key].func();
+    });
+}
 // - Init - //
 let canvas;
 let ctx;
+let canvas_size = new Vector2(window.innerWidth, window.innerHeight);
 window.onresize = resize_canvas;
 function init_canvas() {
     canvas = document.getElementById("canvas");
     ctx = canvas.getContext("2d");
     resize_canvas();
+    canvas.addEventListener('mousemove', (event) => {
+        let mouse_pos = new Vector2(event.clientX, event.clientY);
+        captain.look_at(canvas_size.scale(0.5).minus(mouse_pos), 0.05);
+    });
 }
 function resize_canvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    canvas_size = new Vector2(window.innerWidth, window.innerHeight);
+    canvas.width = canvas_size.x;
+    canvas.height = canvas_size.y;
 }
 let camera = new Camera(new Vector2(0, 0), 1);
 let world_objects = [];
 let ui_objects = [];
+let captain = new Drone(100, new Vector2(0, 0), 0, new Vector2(2, 2));
 function init_world() {
-    world_objects.push(new Drone(100, new Vector2(0, 0), 0, new Vector2(2, 2)));
+    world_objects.push(captain);
+    world_objects.push(new Drone(100, new Vector2(0, -50), 0, new Vector2(1, 1)));
 }
 function init_input() {
+    // Init keyboard input
+    document.addEventListener("keydown", (ev) => {
+        // Checks if the key pressed is used to control the camera
+        if (KEYBOARD_CONTROLLER[ev.key]) {
+            KEYBOARD_CONTROLLER[ev.key].pressed = true;
+        }
+        console.log(camera.pos.debug());
+    });
+    document.addEventListener("keyup", (ev) => {
+        // Checks if the key pressed is used to control the camera
+        if (KEYBOARD_CONTROLLER[ev.key]) {
+            KEYBOARD_CONTROLLER[ev.key].pressed = false;
+        }
+    });
 }
 function ready() {
     init_canvas();
@@ -272,16 +350,21 @@ function ready() {
 let unpaused = false;
 let execute = true;
 let last_animation_frame = 0;
-let delta = 0; // Represents the amount of time since the last animation frame
-let val = 0;
+let delta = 0; // The amount of time since the last animation frame
 function process(timestamp, unpaused) {
     return __awaiter(this, void 0, void 0, function* () {
-        // Unpaused is true if the engine was just unpaused (stoped and then started again)
-        delta = unpaused ? 0 : (timestamp - last_animation_frame) * 0.1;
+        // Unpaused is true if the engine was just unpaused (stopped and then started again)
+        delta = unpaused ? 0 : (timestamp - last_animation_frame);
         last_animation_frame = timestamp;
         if (execute) {
             animate(delta);
             render();
+            activate_inputs();
+            // TODO: LERP SLOWING DOWN AT END OF MOVE_TO
+            // TODO: CAN'T MOVE CAMERA
+            captain.move_to(new Vector2(300, 0), 0.4, lerp);
+            camera.move_to(new Vector2(10, 0), 1);
+            console.log(captain.pos.debug());
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
         else {
