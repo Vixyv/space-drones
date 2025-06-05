@@ -71,8 +71,8 @@ class Polygon {
         return transformed_points
     }
 
-    draw(camera: Camera, object: WorldObj) {
-        let t_points = this.transform(object.rot, object.scale.vec_scale(new Vector2(1/camera.distance, 1/camera.distance)), object.pos.add(camera.offset));
+    draw(object: WorldObj) {
+        let t_points = this.transform(object.rot, object.scale.scale(1/camera.distance), object.pos.scale(1/camera.distance).add(camera.offset));
 
         ctx.strokeStyle = this.colour.toStr();
         ctx.lineWidth = 2;
@@ -158,9 +158,13 @@ class WorldObj {
     }
 
     // Always from the perspective of the object facing right
-    draw(camera: Camera) {
-        this.polygon.draw(camera, this);
-    } 
+    draw() {} 
+
+    // Called every frame and tells the drone to do something (attack, move, etc.)
+    update() {
+        this.draw();
+        this.animator.animate();
+    }
 }
 
 class Camera extends WorldObj {
@@ -173,16 +177,17 @@ class Camera extends WorldObj {
         this.distance = distance;
     }
 
-    draw(camera: Camera) {}
-
     move(vec: Vector2) {
         this.move_vector = this.move_vector.add(vec).normalize();
-        this.move_by(this.move_vector, 0, lerp);
+        this.move_by(this.move_vector.scale(1/this.distance), 0, lerp);
         mouse_world_pos = mouse_world_pos.add(this.move_vector)
     }
 
+    // TODO: Zoom not really working how I want it too
     zoom(mult: number) {
-        this.distance *= mult;
+        // this.animator.add_anim(
+        //     new Anim((value) => { this.distance = value; },
+        //         "zoom", this.distance, this.distance*mult, 0, lerp))
     }
 }
 
@@ -203,9 +208,9 @@ class Drone extends WorldObj {
         ]
     }
 
-    draw(camera: Camera) {
-        this.polygon.draw(camera, this);
-        this.health_bar.draw(camera, this);
+    draw() {
+        this.polygon.draw(this);
+        this.health_bar.draw(this);
     }
     
     // Adds change to health
@@ -213,27 +218,57 @@ class Drone extends WorldObj {
         this.health += change;
         this.health_bar.value = (this.health/this.max_health);
     }
-
-    // Called every frame and tells the drone to do something (attack, move, etc.)
-    execute() {}
 }
 
 class CaptainDrone extends Drone {
+    drone_cluster: DroneCluster;
+
     constructor(max_health: number, pos: Vector2, rot?: number) {
         super(max_health, pos, rot, new Vector2(2, 2))
-        this.polygon.colour = new RGB(94, 140, 247)
+        this.polygon.colour = new RGB(161, 189, 255)
+
+        this.drone_cluster = new DroneCluster(this.pos, 10);
+    }
+
+    update() {
+        super.update();
+
+        this.look_at(mouse_world_pos, 0.04);
+
+        if (this.pos != camera.pos) {
+            this.move_to(camera.pos, 0.09);
+        }
     }
 }
 
 class SoldierDrone extends Drone {
     constructor(max_health: number, pos: Vector2, rot?: number) {
-        super(max_health, pos, rot, new Vector2(2, 2))
-        this.polygon.colour = new RGB(94, 140, 247)
+        super(max_health, pos, rot, new Vector2(1, 1))
+        this.polygon.colour = new RGB(232, 239, 255)
     }
 }
 
 class EnemyDrone extends Drone {
+    constructor(max_health: number, pos: Vector2, rot?: number) {
+        super(max_health, pos, rot, new Vector2(2, 2))
+        this.polygon.colour = new RGB(255, 168, 150)
+    }
+}
 
+enum DroneStates {
+    Follow
+}
+
+class DroneCluster extends WorldObj {
+    drone_state = DroneStates.Follow;
+    drones: Drone[] = [];
+
+    radius: number;
+
+    constructor(pos: Vector2, radius: number) {
+        super(pos)
+        this.radius = radius;
+    }
 }
 
 class Resource extends WorldObj {
@@ -250,7 +285,11 @@ class UI {
         this.size = size;
     }
 
-    draw(camera: Camera) {}
+    update() {
+        this.draw();
+    }
+
+    draw() {}
 }
 
 class LinkedUI {
@@ -274,7 +313,7 @@ class HealthBar extends LinkedUI {
         this.value = value;
     }
 
-    draw(camera: Camera, object: WorldObj) {
+    draw(object: WorldObj) {
         if (this.value == 1) { return }
     }
 
@@ -332,12 +371,14 @@ class Animator {
     }
 
     // Steps (forward) all animations and removes them if they are completed
-    animate(delta: number) {
+    animate() {
         for (let anim=0; anim<this.active_anims.length; anim++) {
-            this.active_anims[anim].step(delta)
-            // if (this.active_anims[anim].step(delta)) {
-            //     this.remove_anim(this.active_anims[anim].name);
-            // };
+            // this.active_anims[anim].step()
+            // TODO: FIGURE OUT WHAT YOU'RE DOING WITH THIS
+            // TODO: Make it so that this works
+            if (this.active_anims[anim].step()) {
+                this.remove_anim(this.active_anims[anim].name);
+            };
         }
     }
 }
@@ -371,7 +412,7 @@ class Anim {
     }
 
     // Step the animation forward (returns true will completed)
-    step(delta: number): boolean {
+    step(): boolean {
         this.elapsed += delta*MILLI_TO_SEC;
 
         if (this.elapsed >= this.duration ) { 
@@ -379,38 +420,36 @@ class Anim {
             this.completed = true;
         }
 
+        console.log(this.name)
+
         this.set_value(this.interp(this.start, this.target, this.elapsed/this.duration))
 
         return this.completed
     }
 }
 
-// Triggers all objects to animate
-function animate(delta: number) {
-    for (let obj=0; obj<world_objects.length; obj++) {
-        world_objects[obj].animator.animate(delta);
-    }
-}
-
-// - Render Pipeline - //
+// - Game Manager - //
 
 function draw_background() {
-    ctx.fillStyle = "rgb(14, 12, 46)";
+    ctx.fillStyle = "rgb(4, 1, 51)";
 
     ctx.clearRect(0, 0, canvas_size.x, canvas_size.y);
     ctx.beginPath();
     ctx.fillRect(0, 0, canvas_size.x, canvas_size.y);
 }
 
-function render() {
+function update_game() {
     draw_background()
 
+    // The objects manage updating themselves on their own
+    // The game just tells them when to do that
     for (let obj=0; obj<world_objects.length; obj++) {
-        world_objects[obj].draw(camera);
+        world_objects[obj].update();
     }
 
+    // UI is called second so that it is drawn on top of the world objects
     for (let obj=0; obj<ui_objects.length; obj++) {
-        ui_objects[obj].draw(camera);
+        ui_objects[obj].update();
     }
 }
 
@@ -418,6 +457,8 @@ function render() {
 
 const MOVE_SPEED = 2;
 let move_vector = new Vector2(0, 0);
+
+const ZOOM_FACTOR = 0.05;
 
 // Allows for multiple keys to be pressed at once
 // Derived from (https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7)
@@ -431,6 +472,10 @@ const KEYBOARD_CONTROLLER: {[key: string]: {pressed: boolean; func: () => void;}
     "a": {pressed: false, func: () => camera.move(new Vector2(-1*MOVE_SPEED, 0))}, // Left
     "s": {pressed: false, func: () => camera.move(new Vector2(0, 1*MOVE_SPEED))},  // Down
     "d": {pressed: false, func: () => camera.move(new Vector2(1*MOVE_SPEED, 0))},  // Right
+    // Camera zoom
+    "=": {pressed: false, func: () => camera.zoom(1-ZOOM_FACTOR)},  // Zoom in
+    "-": {pressed: false, func: () => camera.zoom(1+ZOOM_FACTOR)},  // Zoom out
+
 }
 
 function activate_inputs() {
@@ -470,16 +515,19 @@ function resize_canvas() {
 }
 
 let camera = new Camera(new Vector2(0, 0), 1);
-let world_objects: WorldObj[] = [];
+let world_objects: WorldObj[] = [camera];
 let ui_objects: UI[] = [];
 
-let captain = new Drone(100, new Vector2(0, 0), 0, new Vector2(2, 2))
+let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
 
 function init_world() {
-    world_objects.push(camera)
+    let drone_1 = new SoldierDrone(100, new Vector2(0, -50), 0)
+    let enemy_1 = new EnemyDrone(100, new Vector2(-50, 0), 0)
+
+    captain.drone_cluster.drones.push(drone_1);
 
     world_objects.push(captain)
-    world_objects.push(new Drone(100, new Vector2(0, -50), 0, new Vector2(1, 1)))
+    world_objects.push(drone_1, enemy_1)
 }
 
 function init_input() {
@@ -489,7 +537,6 @@ function init_input() {
         if (KEYBOARD_CONTROLLER[ev.key]) {
             KEYBOARD_CONTROLLER[ev.key].pressed = true;
         }
-        console.log(ev.key)
     });
 
     document.addEventListener("keyup", (ev) => {
@@ -522,15 +569,10 @@ async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     last_animation_frame = timestamp;
 
     if (execute) {
-        animate(delta)
-        render()
+        update_game()
         activate_inputs()
 
         // TODO: LERP SLOWING DOWN AT END OF MOVE_TO/BY
-        camera.move_by(move_vector, 0, lerp);
-
-        captain.look_at(mouse_world_pos, 0.04);
-        captain.move_to(camera.pos, 0.09);
 
         requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, false));
     } else {
