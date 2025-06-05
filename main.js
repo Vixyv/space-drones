@@ -24,6 +24,16 @@ class Vector2 {
     matrix_mult(matrix) {
         return new Vector2(this.x * matrix[0][0] + this.y * matrix[0][1], this.x * matrix[1][0] + this.y * matrix[1][1]);
     }
+    magnitude() { return Math.sqrt(this.x ** 2 + this.y ** 2); }
+    normalize() {
+        let magnitude = this.magnitude();
+        if (magnitude == 0) {
+            return new Vector2(0, 0);
+        }
+        else {
+            return new Vector2(this.x / magnitude, this.y / magnitude);
+        }
+    }
     // Used for printing with console.log()
     debug() { return [this.x, this.y]; }
 }
@@ -36,6 +46,7 @@ class RGB {
     toStr() { return `rgb(${this.r}, ${this.g}, ${this.b})`; }
 }
 // World object classes
+// TODO: Add draw "fill" option (for bullets)
 class Polygon {
     constructor(points, colour) {
         this.points = points;
@@ -83,7 +94,7 @@ class WorldObj {
     // Rotates to a position (default = lerp)
     look_at(pos, duration, interp) {
         interp = interp == undefined ? lerp : interp;
-        let dif = this.pos.minus(pos);
+        let dif = pos.minus(this.pos);
         let desired_rot = Math.atan2(-dif.y, dif.x) * RAD_TO_DEG;
         let rot_dif = desired_rot - this.rot;
         // Prevents snapping (by making desired_rot the shortest path)
@@ -101,6 +112,17 @@ class WorldObj {
         this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, pos.x, duration, interp));
         this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, pos.y, duration, interp));
     }
+    // Moves by some vector
+    move_by(pos, duration, interp) {
+        interp = interp == undefined ? smoothstep : interp;
+        let target_pos = this.pos.add(pos);
+        if (pos.x != 0) {
+            this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, target_pos.x, duration, interp));
+        }
+        if (pos.y != 0) {
+            this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, target_pos.y, duration, interp));
+        }
+    }
     // Always from the perspective of the object facing right
     draw(camera) {
         this.polygon.draw(camera, this);
@@ -111,7 +133,14 @@ class Camera extends WorldObj {
     ;
     constructor(pos, distance) {
         super(pos);
+        this.move_vector = new Vector2(0, 0);
         this.distance = distance;
+    }
+    draw(camera) { }
+    move(vec) {
+        this.move_vector = this.move_vector.add(vec).normalize();
+        this.move_by(this.move_vector, 0, lerp);
+        mouse_world_pos = mouse_world_pos.add(this.move_vector);
     }
     zoom(mult) {
         this.distance *= mult;
@@ -203,6 +232,8 @@ function smoothstep(a, b, t) {
     return a + (t * t * (3 - 2 * t)) * (b - a);
 }
 // - Animation - //
+// TODO: Can't have multiple movement animations at once (last added animation is the one that is run) (modifying different values)
+// TODO: Can have movement and rotation animations at the same time however (reference issue?)
 class Animator {
     constructor() {
         this.active_anims = [];
@@ -224,10 +255,10 @@ class Animator {
     // Steps (forward) all animations and removes them if they are completed
     animate(delta) {
         for (let anim = 0; anim < this.active_anims.length; anim++) {
-            if (this.active_anims[anim].step(delta)) {
-                this.remove_anim(this.active_anims[anim].name);
-            }
-            ;
+            this.active_anims[anim].step(delta);
+            // if (this.active_anims[anim].step(delta)) {
+            //     this.remove_anim(this.active_anims[anim].name);
+            // };
         }
     }
 }
@@ -279,19 +310,20 @@ function render() {
     }
 }
 // - Input - //
-const MOVE_SPEED = 50;
+const MOVE_SPEED = 2;
+let move_vector = new Vector2(0, 0);
 // Allows for multiple keys to be pressed at once
 // Derived from (https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7)
 const KEYBOARD_CONTROLLER = {
     // Camera movement
-    "ArrowUp": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, -1 * MOVE_SPEED)), 0) }, // Up
-    "ArrowDown": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(-1 * MOVE_SPEED, 0)), 0) }, // Left
-    "ArrowLeft": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, 1 * MOVE_SPEED)), 0) }, // Down
-    "ArrowRight": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(1 * MOVE_SPEED, 0)), 0) }, // Right
-    "w": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, -1 * MOVE_SPEED)), 0) }, // Up
-    "a": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(-1 * MOVE_SPEED, 0)), 0) }, // Left
-    "s": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, 1 * MOVE_SPEED)), 0) }, // Down
-    "d": { pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(1 * MOVE_SPEED, 0)), 0) }, // Right
+    "ArrowUp": { pressed: false, func: () => camera.move(new Vector2(0, -1 * MOVE_SPEED)) }, // Up
+    "ArrowDown": { pressed: false, func: () => camera.move(new Vector2(0, 1 * MOVE_SPEED)) }, // Down
+    "ArrowLeft": { pressed: false, func: () => camera.move(new Vector2(-1 * MOVE_SPEED, 0)) }, // Left
+    "ArrowRight": { pressed: false, func: () => camera.move(new Vector2(1 * MOVE_SPEED, 0)) }, // Right
+    "w": { pressed: false, func: () => camera.move(new Vector2(0, -1 * MOVE_SPEED)) }, // Up
+    "a": { pressed: false, func: () => camera.move(new Vector2(-1 * MOVE_SPEED, 0)) }, // Left
+    "s": { pressed: false, func: () => camera.move(new Vector2(0, 1 * MOVE_SPEED)) }, // Down
+    "d": { pressed: false, func: () => camera.move(new Vector2(1 * MOVE_SPEED, 0)) }, // Right
 };
 function activate_inputs() {
     Object.keys(KEYBOARD_CONTROLLER).forEach(key => {
@@ -302,15 +334,19 @@ function activate_inputs() {
 let canvas;
 let ctx;
 let canvas_size = new Vector2(window.innerWidth, window.innerHeight);
+let mouse_world_pos = new Vector2(0, 0);
 window.onresize = resize_canvas;
 function init_canvas() {
     canvas = document.getElementById("canvas");
     ctx = canvas.getContext("2d");
     resize_canvas();
     canvas.addEventListener('mousemove', (event) => {
-        let mouse_pos = new Vector2(event.clientX, event.clientY);
-        captain.look_at(canvas_size.scale(0.5).minus(mouse_pos), 0.05);
+        mouse_world_pos = mouse_to_world(event);
     });
+}
+// Acounts for camera position
+function mouse_to_world(event) {
+    return canvas_size.scale(0.5).minus(new Vector2(event.clientX, event.clientY)).scale(-1).add(camera.pos);
 }
 function resize_canvas() {
     canvas_size = new Vector2(window.innerWidth, window.innerHeight);
@@ -322,6 +358,7 @@ let world_objects = [];
 let ui_objects = [];
 let captain = new Drone(100, new Vector2(0, 0), 0, new Vector2(2, 2));
 function init_world() {
+    world_objects.push(camera);
     world_objects.push(captain);
     world_objects.push(new Drone(100, new Vector2(0, -50), 0, new Vector2(1, 1)));
 }
@@ -332,7 +369,7 @@ function init_input() {
         if (KEYBOARD_CONTROLLER[ev.key]) {
             KEYBOARD_CONTROLLER[ev.key].pressed = true;
         }
-        console.log(camera.pos.debug());
+        console.log(ev.key);
     });
     document.addEventListener("keyup", (ev) => {
         // Checks if the key pressed is used to control the camera
@@ -351,6 +388,7 @@ let unpaused = false;
 let execute = true;
 let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
+// TODO: Issue with delta changing when tabbing out (maybe not issue, interp still broken (slowing down at end))
 function process(timestamp, unpaused) {
     return __awaiter(this, void 0, void 0, function* () {
         // Unpaused is true if the engine was just unpaused (stopped and then started again)
@@ -360,11 +398,10 @@ function process(timestamp, unpaused) {
             animate(delta);
             render();
             activate_inputs();
-            // TODO: LERP SLOWING DOWN AT END OF MOVE_TO
-            // TODO: CAN'T MOVE CAMERA
-            captain.move_to(new Vector2(300, 0), 0.4, lerp);
-            camera.move_to(new Vector2(10, 0), 1);
-            console.log(captain.pos.debug());
+            // TODO: LERP SLOWING DOWN AT END OF MOVE_TO/BY
+            camera.move_by(move_vector, 0, lerp);
+            captain.look_at(mouse_world_pos, 0.04);
+            captain.move_to(camera.pos, 0.09);
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
         else {

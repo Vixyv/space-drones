@@ -22,6 +22,12 @@ class Vector2 {
             this.x*matrix[1][0] + this.y*matrix[1][1],
         )
     }
+    magnitude() { return Math.sqrt(this.x**2 + this.y**2) }
+    normalize() {
+        let magnitude = this.magnitude();
+        if (magnitude == 0) { return new Vector2(0, 0) }
+        else { return new Vector2(this.x/magnitude, this.y/magnitude) }
+    }
     // Used for printing with console.log()
     debug(): number[] { return [this.x, this.y] }
 }
@@ -41,6 +47,7 @@ class RGB {
 }
 
 // World object classes
+// TODO: Add draw "fill" option (for bullets)
 class Polygon {
     points: Vector2[];
     colour: RGB;
@@ -105,7 +112,7 @@ class WorldObj {
     look_at(pos: Vector2, duration: number, interp?: InterpFunc) {
         interp = interp == undefined ? lerp : interp;
 
-        let dif = this.pos.minus(pos);
+        let dif = pos.minus(this.pos);
 
         let desired_rot = Math.atan2(-dif.y, dif.x)*RAD_TO_DEG;
         let rot_dif = desired_rot-this.rot;
@@ -131,6 +138,25 @@ class WorldObj {
                      "move_y", this.pos.y, pos.y, duration, interp))
     }
 
+    // Moves by some vector
+    move_by(pos: Vector2, duration: number, interp?: InterpFunc) {
+        interp = interp == undefined ? smoothstep : interp;
+
+        let target_pos = this.pos.add(pos);
+
+        if (pos.x != 0) {
+            this.animator.add_anim(
+                new Anim((value) => { this.pos.x = value; },
+                        "move_x", this.pos.x, target_pos.x, duration, interp))
+        }
+
+        if (pos.y != 0) {
+            this.animator.add_anim(
+                new Anim((value) => { this.pos.y = value; },
+                        "move_y", this.pos.y, target_pos.y, duration, interp))
+        }
+    }
+
     // Always from the perspective of the object facing right
     draw(camera: Camera) {
         this.polygon.draw(camera, this);
@@ -139,11 +165,20 @@ class WorldObj {
 
 class Camera extends WorldObj {
     distance: number;
+    move_vector = new Vector2(0, 0);
     get offset() { return new Vector2(canvas_size.x*0.5, canvas_size.y*0.5).minus(this.pos) };
 
     constructor(pos: Vector2, distance: number) {
         super(pos)
         this.distance = distance;
+    }
+
+    draw(camera: Camera) {}
+
+    move(vec: Vector2) {
+        this.move_vector = this.move_vector.add(vec).normalize();
+        this.move_by(this.move_vector, 0, lerp);
+        mouse_world_pos = mouse_world_pos.add(this.move_vector)
     }
 
     zoom(mult: number) {
@@ -274,6 +309,8 @@ function smoothstep(a: number, b: number, t: number): number {
 
 // - Animation - //
 
+// TODO: Can't have multiple movement animations at once (last added animation is the one that is run) (modifying different values)
+// TODO: Can have movement and rotation animations at the same time however (reference issue?)
 class Animator {
     active_anims: Anim[] = [];
 
@@ -297,9 +334,10 @@ class Animator {
     // Steps (forward) all animations and removes them if they are completed
     animate(delta: number) {
         for (let anim=0; anim<this.active_anims.length; anim++) {
-            if (this.active_anims[anim].step(delta)) {
-                this.remove_anim(this.active_anims[anim].name);
-            };
+            this.active_anims[anim].step(delta)
+            // if (this.active_anims[anim].step(delta)) {
+            //     this.remove_anim(this.active_anims[anim].name);
+            // };
         }
     }
 }
@@ -328,7 +366,7 @@ class Anim {
         this.start = start;
         this.target = target;
 
-        this.duration = duration <= 0 ? Number.MIN_VALUE : duration ;
+        this.duration = duration <= 0 ? Number.MIN_VALUE : duration;
         this.interp = interp == undefined ? this.interp : interp;
     }
 
@@ -342,7 +380,7 @@ class Anim {
         }
 
         this.set_value(this.interp(this.start, this.target, this.elapsed/this.duration))
-    
+
         return this.completed
     }
 }
@@ -378,20 +416,21 @@ function render() {
 
 // - Input - //
 
-const MOVE_SPEED = 50;
+const MOVE_SPEED = 2;
+let move_vector = new Vector2(0, 0);
 
 // Allows for multiple keys to be pressed at once
 // Derived from (https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7)
 const KEYBOARD_CONTROLLER: {[key: string]: {pressed: boolean; func: () => void;}} = {
     // Camera movement
-    "ArrowUp": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, -1*MOVE_SPEED)), 0)},   // Up
-    "ArrowDown": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(-1*MOVE_SPEED, 0)), 0)}, // Left
-    "ArrowLeft": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, 1*MOVE_SPEED)), 0)},  // Down
-    "ArrowRight": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(1*MOVE_SPEED, 0)), 0)}, // Right
-    "w": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, -1*MOVE_SPEED)), 0)}, // Up
-    "a": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(-1*MOVE_SPEED, 0)), 0)}, // Left
-    "s": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(0, 1*MOVE_SPEED)), 0)},  // Down
-    "d": {pressed: false, func: () => camera.move_to(camera.pos.add(new Vector2(1*MOVE_SPEED, 0)), 0)},  // Right
+    "ArrowUp": {pressed: false, func: () => camera.move(new Vector2(0, -1*MOVE_SPEED))},   // Up
+    "ArrowDown": {pressed: false, func: () => camera.move(new Vector2(0, 1*MOVE_SPEED))},  // Down
+    "ArrowLeft": {pressed: false, func: () => camera.move(new Vector2(-1*MOVE_SPEED, 0))}, // Left
+    "ArrowRight": {pressed: false, func: () => camera.move(new Vector2(1*MOVE_SPEED, 0))}, // Right
+    "w": {pressed: false, func: () => camera.move(new Vector2(0, -1*MOVE_SPEED))}, // Up
+    "a": {pressed: false, func: () => camera.move(new Vector2(-1*MOVE_SPEED, 0))}, // Left
+    "s": {pressed: false, func: () => camera.move(new Vector2(0, 1*MOVE_SPEED))},  // Down
+    "d": {pressed: false, func: () => camera.move(new Vector2(1*MOVE_SPEED, 0))},  // Right
 }
 
 function activate_inputs() {
@@ -405,6 +444,7 @@ function activate_inputs() {
 let canvas: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
 let canvas_size = new Vector2(window.innerWidth, window.innerHeight);
+let mouse_world_pos = new Vector2(0, 0);
 window.onresize = resize_canvas;
 
 function init_canvas() {
@@ -414,9 +454,13 @@ function init_canvas() {
     resize_canvas()
 
     canvas.addEventListener('mousemove', (event) => {
-        let mouse_pos = new Vector2(event.clientX, event.clientY)
-        captain.look_at(canvas_size.scale(0.5).minus(mouse_pos), 0.05);
+        mouse_world_pos = mouse_to_world(event);
     });
+}
+
+// Acounts for camera position
+function mouse_to_world(event: MouseEvent): Vector2 {
+    return canvas_size.scale(0.5).minus(new Vector2(event.clientX, event.clientY)).scale(-1).add(camera.pos);
 }
 
 function resize_canvas() {
@@ -432,6 +476,8 @@ let ui_objects: UI[] = [];
 let captain = new Drone(100, new Vector2(0, 0), 0, new Vector2(2, 2))
 
 function init_world() {
+    world_objects.push(camera)
+
     world_objects.push(captain)
     world_objects.push(new Drone(100, new Vector2(0, -50), 0, new Vector2(1, 1)))
 }
@@ -443,7 +489,7 @@ function init_input() {
         if (KEYBOARD_CONTROLLER[ev.key]) {
             KEYBOARD_CONTROLLER[ev.key].pressed = true;
         }
-        console.log(camera.pos.debug())
+        console.log(ev.key)
     });
 
     document.addEventListener("keyup", (ev) => {
@@ -469,6 +515,7 @@ let execute = true;
 let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
 
+// TODO: Issue with delta changing when tabbing out (maybe not issue, interp still broken (slowing down at end))
 async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     // Unpaused is true if the engine was just unpaused (stopped and then started again)
     delta = unpaused ? 0 : (timestamp - last_animation_frame);
@@ -479,12 +526,11 @@ async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
         render()
         activate_inputs()
 
-        // TODO: LERP SLOWING DOWN AT END OF MOVE_TO
-        // TODO: CAN'T MOVE CAMERA
+        // TODO: LERP SLOWING DOWN AT END OF MOVE_TO/BY
+        camera.move_by(move_vector, 0, lerp);
 
-        captain.move_to(new Vector2(300, 0), 0.4, lerp)
-        camera.move_to(new Vector2(10, 0), 1)
-        console.log(captain.pos.debug())
+        captain.look_at(mouse_world_pos, 0.04);
+        captain.move_to(camera.pos, 0.09);
 
         requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, false));
     } else {
