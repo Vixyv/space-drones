@@ -74,10 +74,46 @@ class Polygon {
         ctx.closePath();
         ctx.stroke();
     }
+    // TODO: Test if this works
     // Checks if a given point is within a polygon
+    // Developed from https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
     point_in_polygon(point, camera, object) {
+        // Gets the transformed points of the polygon
         let t_points = this.transform(object.rot, object.scale.scale(1 / camera.distance), object.pos.add(camera.offset));
-        return false;
+        // Calculates bounding box of the points
+        let [x_max, x_min, y_max, y_min] = [0, 0, 0, 0];
+        for (let p = 0; p < t_points.length; p++) {
+            if (t_points[p].x > x_max) {
+                x_max = t_points[p].x;
+            }
+            else if (t_points[p].x < x_min) {
+                x_min = t_points[p].x;
+            }
+            if (t_points[p].y > y_max) {
+                y_max = t_points[p].y;
+            }
+            else if (t_points[p].y < y_min) {
+                y_min = t_points[p].y;
+            }
+        }
+        // Checks if the point is outside the bounding box
+        if (point.x > x_max || point.x < x_min || point.y > y_max || point.y < y_min) {
+            return false;
+        }
+        // This is a point we know to be outside of the polygon and will be the end of the vector from `point`
+        let outside_point = new Vector2(x_min - 1, point.y);
+        let intersections = 0;
+        for (let s = 0; s < t_points.length + 1; s++) {
+            if (vectors_intersect(point, outside_point, t_points[s], t_points[(s + 1) % (t_points.length + 1)])) {
+                intersections++;
+            }
+        }
+        if (intersections % 2 == 1) {
+            return true;
+        }
+        else {
+            return false;
+        }
     }
 }
 class WorldObj {
@@ -109,18 +145,18 @@ class WorldObj {
     // Moves to a position (default = smoothstep)
     move_to(pos, duration, interp) {
         interp = interp == undefined ? smoothstep : interp;
-        this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, pos.x, duration, interp));
         this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, pos.y, duration, interp));
+        this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, pos.x, duration, interp));
     }
     // Moves by some vector
     move_by(pos, duration, interp) {
         interp = interp == undefined ? smoothstep : interp;
         let target_pos = this.pos.add(pos);
-        if (pos.x != 0) {
-            this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, target_pos.x, duration, interp));
-        }
         if (pos.y != 0) {
             this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, target_pos.y, duration, interp));
+        }
+        if (pos.x != 0) {
+            this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, target_pos.x, duration, interp));
         }
     }
     // Always from the perspective of the object facing right
@@ -139,16 +175,21 @@ class Camera extends WorldObj {
         this.move_vector = new Vector2(0, 0);
         this.distance = distance;
     }
-    move(vec) {
-        this.move_vector = this.move_vector.add(vec).normalize();
-        this.move_by(this.move_vector.scale(1 / this.distance), 0, lerp);
+    move() {
+        this.move_vector = this.move_vector.normalize().scale(MOVE_SPEED);
+        this.pos = this.pos.add(this.move_vector.scale(1 / this.distance));
         mouse_world_pos = mouse_world_pos.add(this.move_vector);
+        this.move_vector = new Vector2(0, 0);
     }
     // TODO: Zoom not really working how I want it too
     zoom(mult) {
         // this.animator.add_anim(
         //     new Anim((value) => { this.distance = value; },
         //         "zoom", this.distance, this.distance*mult, 0, lerp))
+    }
+    update() {
+        this.move();
+        this.animator.animate();
     }
 }
 class Drone extends WorldObj {
@@ -261,6 +302,48 @@ function lerp(a, b, t) {
 function smoothstep(a, b, t) {
     return a + (t * t * (3 - 2 * t)) * (b - a);
 }
+// Determines if two vectors intersect
+// Again, from https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
+function vectors_intersect(v1_i, v1_f, v2_i, v2_f) {
+    // `Ax + By + C = 0` (standard linear equation) form of vector 1
+    let a1 = v1_f.y - v1_i.y;
+    let b1 = v1_i.x - v1_f.x;
+    let c1 = (v1_f.x * v1_i.y) - (v1_i.x * v1_f.y);
+    // Calculates which side of the line each vector 2 point is on (if they are on the same side, they have the same sign)
+    let d1 = (a1 * v2_i.x) + (b1 * v2_i.y) + c1;
+    let d2 = (a1 * v2_f.x) + (b1 * v2_f.y) + c1;
+    // If they both have the same sign, an intersection is not possible
+    if (d1 > 0 && d2 > 0) {
+        return false;
+    }
+    ;
+    if (d1 < 0 && d2 < 0) {
+        return false;
+    }
+    ;
+    // Also have to check if vector 1 intersects vector 2 (not just that vector 2 intersects vector 1)
+    // `Ax + By + C = 0` (standard linear equation) form of vector 2
+    let a2 = v2_f.y - v2_i.y;
+    let b2 = v2_i.x - v2_f.x;
+    let c2 = (v2_f.x * v2_i.y) - (v2_i.x * v2_f.y);
+    // Same as before expect with vector 1
+    d1 = (a2 * v1_i.x) + (b2 * v1_i.y) + c2;
+    d2 = (a2 * v1_f.x) + (b2 * v1_f.y) + c2;
+    if (d1 > 0 && d2 > 0) {
+        return false;
+    }
+    ;
+    if (d1 < 0 && d2 < 0) {
+        return false;
+    }
+    ;
+    // Checks if the lines are collinear
+    if ((a1 * b2) - (a2 * b1) == 0) {
+        return false;
+    }
+    ;
+    return true;
+}
 // - Animation - //
 // TODO: Can't have multiple movement animations at once (last added animation is the one that is run) (modifying different values)
 // TODO: Can have movement and rotation animations at the same time however (reference issue?)
@@ -316,7 +399,7 @@ class Anim {
             this.elapsed = this.duration;
             this.completed = true;
         }
-        console.log(this.name);
+        // console.log(this.name)
         this.set_value(this.interp(this.start, this.target, this.elapsed / this.duration));
         return this.completed;
     }
@@ -345,17 +428,17 @@ const MOVE_SPEED = 2;
 let move_vector = new Vector2(0, 0);
 const ZOOM_FACTOR = 0.05;
 // Allows for multiple keys to be pressed at once
-// Derived from (https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7)
+// Derived from https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7
 const KEYBOARD_CONTROLLER = {
     // Camera movement
-    "ArrowUp": { pressed: false, func: () => camera.move(new Vector2(0, -1 * MOVE_SPEED)) }, // Up
-    "ArrowDown": { pressed: false, func: () => camera.move(new Vector2(0, 1 * MOVE_SPEED)) }, // Down
-    "ArrowLeft": { pressed: false, func: () => camera.move(new Vector2(-1 * MOVE_SPEED, 0)) }, // Left
-    "ArrowRight": { pressed: false, func: () => camera.move(new Vector2(1 * MOVE_SPEED, 0)) }, // Right
-    "w": { pressed: false, func: () => camera.move(new Vector2(0, -1 * MOVE_SPEED)) }, // Up
-    "a": { pressed: false, func: () => camera.move(new Vector2(-1 * MOVE_SPEED, 0)) }, // Left
-    "s": { pressed: false, func: () => camera.move(new Vector2(0, 1 * MOVE_SPEED)) }, // Down
-    "d": { pressed: false, func: () => camera.move(new Vector2(1 * MOVE_SPEED, 0)) }, // Right
+    "ArrowUp": { pressed: false, func: () => camera.move_vector.y += -1 }, // Up
+    "ArrowDown": { pressed: false, func: () => camera.move_vector.y += 1 }, // Down
+    "ArrowLeft": { pressed: false, func: () => camera.move_vector.x += -1 }, // Left
+    "ArrowRight": { pressed: false, func: () => camera.move_vector.x += 1 }, // Right
+    "w": { pressed: false, func: () => camera.move_vector.y += -1 }, // Up
+    "a": { pressed: false, func: () => camera.move_vector.x += -1 }, // Left
+    "s": { pressed: false, func: () => camera.move_vector.y += 1 }, // Down
+    "d": { pressed: false, func: () => camera.move_vector.x += 1 }, // Right
     // Camera zoom
     "=": { pressed: false, func: () => camera.zoom(1 - ZOOM_FACTOR) }, // Zoom in
     "-": { pressed: false, func: () => camera.zoom(1 + ZOOM_FACTOR) }, // Zoom out
@@ -371,6 +454,7 @@ let ctx;
 let canvas_size = new Vector2(window.innerWidth, window.innerHeight);
 let mouse_world_pos = new Vector2(0, 0);
 window.onresize = resize_canvas;
+// TODO: Use ctx.setTransform() to adjust how things are drawn, not screen width and stuff etc.
 function init_canvas() {
     canvas = document.getElementById("canvas");
     ctx = canvas.getContext("2d");
@@ -424,7 +508,6 @@ let unpaused = false;
 let execute = true;
 let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
-// TODO: Issue with delta changing when tabbing out (maybe not issue, interp still broken (slowing down at end))
 function process(timestamp, unpaused) {
     return __awaiter(this, void 0, void 0, function* () {
         // Unpaused is true if the engine was just unpaused (stopped and then started again)
@@ -433,7 +516,6 @@ function process(timestamp, unpaused) {
         if (execute) {
             update_game();
             activate_inputs();
-            // TODO: LERP SLOWING DOWN AT END OF MOVE_TO/BY
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
         else {

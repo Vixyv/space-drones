@@ -13,5 +13,5 @@ html, body {
     margin: 0;
     outline: 2px solid black;
 
-    image-rendering: pixelated;
+    image-rendering: crisp-edges;
 }
