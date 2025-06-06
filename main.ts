@@ -49,10 +49,12 @@ class RGB {
 // World object classes
 // TODO: Add draw "fill" option (for bullets)
 class Polygon {
+    object: WorldObj;
     points: Vector2[];
     colour: RGB;
 
-    constructor(points: Vector2[], colour: RGB) {
+    constructor(object: WorldObj, points: Vector2[], colour: RGB) {
+        this.object = object;
         this.points = points;
         this.colour = colour;
     }
@@ -71,8 +73,8 @@ class Polygon {
         return transformed_points
     }
 
-    draw(object: WorldObj) {
-        let t_points = this.transform(object.rot, object.scale.scale(1/camera.distance), object.pos.scale(1/camera.distance).add(camera.offset));
+    draw() {
+        let t_points = this.transform(this.object.rot, this.object.scale.scale(1/camera.distance), this.object.pos.scale(1/camera.distance).add(camera.offset));
 
         ctx.strokeStyle = this.colour.toStr();
         ctx.lineWidth = 2;
@@ -89,9 +91,11 @@ class Polygon {
     // TODO: Test if this works
     // Checks if a given point is within a polygon
     // Developed from https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
-    point_in_polygon(point: Vector2, camera: Camera, object: WorldObj): boolean {
+    point_in_polygon(point: Vector2): boolean {
         // Gets the transformed points of the polygon
-        let t_points = this.transform(object.rot, object.scale.scale(1/camera.distance), object.pos.add(camera.offset));
+        let t_points = this.transform(this.object.rot, this.object.scale.scale(1/camera.distance), this.object.pos.add(camera.offset));
+
+        console.log(point, t_points)
 
         // Calculates bounding box of the points
         let [x_max, x_min, y_max, y_min] = [0, 0, 0, 0];
@@ -111,8 +115,8 @@ class Polygon {
         let outside_point = new Vector2(x_min-1, point.y);
 
         let intersections = 0;
-        for (let s=0; s<t_points.length+1; s++) {
-            if (vectors_intersect(point, outside_point, t_points[s], t_points[(s+1)%(t_points.length+1)])) {
+        for (let s=0; s<t_points.length; s++) {
+            if (vectors_intersect(point, outside_point, t_points[s], t_points[(s+1)%(t_points.length)])) {
                 intersections++;
             }
         }
@@ -129,7 +133,7 @@ class WorldObj {
     pos: Vector2; // Relative to world origin, -y up, +x right, (x, y)
     rot = 0;      // Based on unit cicle, 0 = facing right, degrees
     scale = new Vector2(1, 1);
-    polygon = new Polygon([], new RGB(255, 255, 255));
+    polygon = new Polygon(this, [], new RGB(255, 255, 255));
     animator = new Animator();
 
     constructor(pos: Vector2, rot?: number, scale?: Vector2, polygon?: Polygon) {
@@ -233,7 +237,7 @@ class Camera extends WorldObj {
 class Drone extends WorldObj {
     max_health: number;
     health: number;
-    health_bar = new HealthBar(1, this.pos.add(new Vector2(0, 1)), this.scale);
+    health_bar = new HealthBar(this, 1, new Vector2(0, 1), this.scale);
 
     constructor(max_health: number, pos: Vector2, rot?: number, scale?: Vector2) {
         super(pos, rot, scale)
@@ -248,8 +252,8 @@ class Drone extends WorldObj {
     }
 
     draw() {
-        this.polygon.draw(this);
-        this.health_bar.draw(this);
+        this.polygon.draw();
+        this.health_bar.draw();
     }
     
     // Adds change to health
@@ -332,10 +336,12 @@ class UI {
 }
 
 class LinkedUI {
+    object: WorldObj;
     offset: Vector2;
     size: Vector2;
 
-    constructor(offset: Vector2, size: Vector2) {
+    constructor(object: WorldObj, offset: Vector2, size: Vector2) {
+        this.object = object;
         this.offset = offset;
         this.size = size;
     }
@@ -347,16 +353,16 @@ class LinkedUI {
 class HealthBar extends LinkedUI {
     value: number; // Percentage
 
-    constructor(value: number, pos: Vector2, size: Vector2) {
-        super(pos, size)
+    constructor(object: WorldObj, value: number, offset: Vector2, size: Vector2) {
+        super(object, offset, size)
         this.value = value;
     }
 
-    draw(object: WorldObj) {
+    draw() {
         if (this.value == 1) { return }
     }
 
-    update_pos(object: WorldObj) {
+    update_pos() {
 
     }
 }
@@ -594,15 +600,15 @@ let world_objects: WorldObj[] = [camera];
 let ui_objects: UI[] = [];
 
 let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
+let enemy = new EnemyDrone(100, new Vector2(-50, 0), 0);
 
 function init_world() {
     let drone_1 = new SoldierDrone(100, new Vector2(0, -50), 0)
-    let enemy_1 = new EnemyDrone(100, new Vector2(-50, 0), 0)
 
     captain.drone_cluster.drones.push(drone_1);
 
     world_objects.push(captain)
-    world_objects.push(drone_1, enemy_1)
+    world_objects.push(drone_1, enemy)
 }
 
 function init_input() {
@@ -645,6 +651,11 @@ async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     if (execute) {
         update_game()
         activate_inputs()
+
+        for (let p=0; p<1; p++) {
+            // The issue is that I am only transforming the points of the polygon, no of the point (I need to do that before hand)
+            enemy.polygon.point_in_polygon(captain.polygon.points[p])
+        }
 
         requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, false));
     } else {

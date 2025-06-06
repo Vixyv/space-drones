@@ -77,9 +77,10 @@ class Polygon {
     // TODO: Test if this works
     // Checks if a given point is within a polygon
     // Developed from https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
-    point_in_polygon(point, camera, object) {
+    point_in_polygon(point, object) {
         // Gets the transformed points of the polygon
         let t_points = this.transform(object.rot, object.scale.scale(1 / camera.distance), object.pos.add(camera.offset));
+        console.log(point, t_points);
         // Calculates bounding box of the points
         let [x_max, x_min, y_max, y_min] = [0, 0, 0, 0];
         for (let p = 0; p < t_points.length; p++) {
@@ -103,8 +104,8 @@ class Polygon {
         // This is a point we know to be outside of the polygon and will be the end of the vector from `point`
         let outside_point = new Vector2(x_min - 1, point.y);
         let intersections = 0;
-        for (let s = 0; s < t_points.length + 1; s++) {
-            if (vectors_intersect(point, outside_point, t_points[s], t_points[(s + 1) % (t_points.length + 1)])) {
+        for (let s = 0; s < t_points.length; s++) {
+            if (vectors_intersect(point, outside_point, t_points[s], t_points[(s + 1) % (t_points.length)])) {
                 intersections++;
             }
         }
@@ -476,12 +477,12 @@ let camera = new Camera(new Vector2(0, 0), 1);
 let world_objects = [camera];
 let ui_objects = [];
 let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
+let enemy = new EnemyDrone(100, new Vector2(-50, 0), 0);
 function init_world() {
     let drone_1 = new SoldierDrone(100, new Vector2(0, -50), 0);
-    let enemy_1 = new EnemyDrone(100, new Vector2(-50, 0), 0);
     captain.drone_cluster.drones.push(drone_1);
     world_objects.push(captain);
-    world_objects.push(drone_1, enemy_1);
+    world_objects.push(drone_1, enemy);
 }
 function init_input() {
     // Init keyboard input
@@ -516,6 +517,10 @@ function process(timestamp, unpaused) {
         if (execute) {
             update_game();
             activate_inputs();
+            for (let p = 0; p < 1; p++) {
+                // The issue is that I am only transforming the points of the polygon, no of the point (I need to do that before hand)
+                enemy.polygon.point_in_polygon(captain.polygon.points[p], enemy);
+            }
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
         else {
