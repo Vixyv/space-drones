@@ -48,55 +48,63 @@ class RGB {
 // World object classes
 // TODO: Add draw "fill" option (for bullets)
 class Polygon {
-    constructor(points, colour) {
+    constructor(object, points, colour) {
+        this.t_points = []; // Array of transformed points
+        this.object = object;
         this.points = points;
         this.colour = colour;
     }
-    transform(rot, scale, pos) {
-        let transformed_points = [];
-        rot *= DEG_TO_RAD;
+    transform(point) {
+        let rot = this.object.rot * DEG_TO_RAD;
         let rot_matrix = [[Math.cos(rot), Math.sin(rot)],
             [-Math.sin(rot), Math.cos(rot)]];
-        for (let point = 0; point < this.points.length; point++) {
-            transformed_points.push(this.points[point].matrix_mult(rot_matrix).vec_scale(scale).add(pos));
-        }
-        return transformed_points;
+        return point.matrix_mult(rot_matrix).vec_scale(this.object.scale).add(this.object.pos).add(camera.offset);
     }
-    draw(object) {
-        let t_points = this.transform(object.rot, object.scale.scale(1 / camera.distance), object.pos.scale(1 / camera.distance).add(camera.offset));
+    transform_points() {
+        this.t_points = [];
+        for (let p = 0; p < this.points.length; p++) {
+            this.t_points.push(this.transform(this.points[p]));
+        }
+    }
+    draw(fill) {
+        this.transform_points(); // Updates t_points
+        ctx.fillStyle = this.colour.toStr();
         ctx.strokeStyle = this.colour.toStr();
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(t_points[0].x, t_points[0].y);
-        for (let point = 1; point < t_points.length; point++) {
-            ctx.lineTo(t_points[point].x, t_points[point].y);
+        ctx.moveTo(this.t_points[0].x, this.t_points[0].y);
+        for (let point = 1; point < this.t_points.length; point++) {
+            ctx.lineTo(this.t_points[point].x, this.t_points[point].y);
         }
         ctx.closePath();
         ctx.stroke();
+        if (fill == true) {
+            ctx.fill();
+        }
     }
-    // TODO: Test if this works
-    // Checks if a given point is within a polygon
-    // Developed from https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
-    point_in_polygon(point, object) {
-        // Gets the transformed points of the polygon
-        let t_points = this.transform(object.rot, object.scale.scale(1 / camera.distance), object.pos.add(camera.offset));
-        console.log(point, t_points);
-        // Calculates bounding box of the points
+    // Returns [x_max, x_min, y_max, y_min]
+    bounding_box() {
         let [x_max, x_min, y_max, y_min] = [0, 0, 0, 0];
-        for (let p = 0; p < t_points.length; p++) {
-            if (t_points[p].x > x_max) {
-                x_max = t_points[p].x;
+        for (let p = 0; p < this.t_points.length; p++) {
+            if (this.t_points[p].x > x_max) {
+                x_max = this.t_points[p].x;
             }
-            else if (t_points[p].x < x_min) {
-                x_min = t_points[p].x;
+            else if (this.t_points[p].x < x_min) {
+                x_min = this.t_points[p].x;
             }
-            if (t_points[p].y > y_max) {
-                y_max = t_points[p].y;
+            if (this.t_points[p].y > y_max) {
+                y_max = this.t_points[p].y;
             }
-            else if (t_points[p].y < y_min) {
-                y_min = t_points[p].y;
+            else if (this.t_points[p].y < y_min) {
+                y_min = this.t_points[p].y;
             }
         }
+        return [x_max, x_min, y_max, y_min];
+    }
+    // Checks if a given point is within a polygon (assumes point is transformed correctly)
+    // Developed from https://stackoverflow.com/questions/217578/how-can-i-determine-whether-a-2d-point-is-within-a-polygon
+    point_in_polygon(point) {
+        let [x_max, x_min, y_max, y_min] = this.bounding_box();
         // Checks if the point is outside the bounding box
         if (point.x > x_max || point.x < x_min || point.y > y_max || point.y < y_min) {
             return false;
@@ -104,12 +112,28 @@ class Polygon {
         // This is a point we know to be outside of the polygon and will be the end of the vector from `point`
         let outside_point = new Vector2(x_min - 1, point.y);
         let intersections = 0;
-        for (let s = 0; s < t_points.length; s++) {
-            if (vectors_intersect(point, outside_point, t_points[s], t_points[(s + 1) % (t_points.length)])) {
+        for (let s = 0; s < this.t_points.length; s++) {
+            if (vectors_intersect(point, outside_point, this.t_points[s], this.t_points[(s + 1) % (this.t_points.length)])) {
                 intersections++;
             }
         }
         if (intersections % 2 == 1) {
+            return true;
+        }
+        else {
+            return false;
+        }
+    }
+    vector_in_polygon(vec_i, vec_f) {
+        // Compares the vector to all sides of the polygon
+        for (let s = 0; s < this.t_points.length; s++) {
+            if (vectors_intersect(vec_i, vec_f, this.t_points[s], this.t_points[(s + 1) % (this.t_points.length)])) {
+                return true;
+            }
+        }
+        // The vector could be completely inside the polygon so we test on point
+        // However, we only need to test one point (and don't recalculate bounds)
+        if (this.point_in_polygon(vec_i)) {
             return true;
         }
         else {
@@ -121,7 +145,7 @@ class WorldObj {
     constructor(pos, rot, scale, polygon) {
         this.rot = 0; // Based on unit cicle, 0 = facing right, degrees
         this.scale = new Vector2(1, 1);
-        this.polygon = new Polygon([], new RGB(255, 255, 255));
+        this.polygon = new Polygon(this, [], new RGB(255, 255, 255));
         this.animator = new Animator();
         this.pos = pos;
         this.rot = rot == undefined ? this.rot : rot;
@@ -141,24 +165,36 @@ class WorldObj {
         else if (rot_dif < -180) {
             this.rot -= 360;
         }
-        this.animator.add_anim(new Anim((value) => { this.rot = value; }, "rotate", this.rot, desired_rot, duration, interp));
+        this.animator.add_anim(new Anim((value) => { this.rot = value; }, "look_at", this.rot, desired_rot, duration, interp));
+    }
+    rotate_by(rotation, duration, interp) {
+        this.animator.add_anim(new Anim((value) => { this.rot = value; }, "rotate_by", this.rot, this.rot + rotation, duration, interp));
     }
     // Moves to a position (default = smoothstep)
     move_to(pos, duration, interp) {
         interp = interp == undefined ? smoothstep : interp;
-        this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, pos.y, duration, interp));
-        this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, pos.x, duration, interp));
+        this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_to_y", this.pos.y, pos.y, duration, interp));
+        this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_to_x", this.pos.x, pos.x, duration, interp));
     }
     // Moves by some vector
     move_by(pos, duration, interp) {
         interp = interp == undefined ? smoothstep : interp;
         let target_pos = this.pos.add(pos);
         if (pos.y != 0) {
-            this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_y", this.pos.y, target_pos.y, duration, interp));
+            this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_by_y", this.pos.y, target_pos.y, duration, interp));
         }
         if (pos.x != 0) {
-            this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_x", this.pos.x, target_pos.x, duration, interp));
+            this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_by_x", this.pos.x, target_pos.x, duration, interp));
         }
+    }
+    colliding_with(object) {
+        // Checks if a side (vector) of `object` is in this object
+        for (let s = 0; s < object.polygon.t_points.length; s++) {
+            if (this.polygon.vector_in_polygon(object.polygon.t_points[s], object.polygon.t_points[(s + 1) % (object.polygon.t_points.length)])) {
+                return true;
+            }
+        }
+        return false;
     }
     // Always from the perspective of the object facing right
     draw() { }
@@ -194,9 +230,10 @@ class Camera extends WorldObj {
     }
 }
 class Drone extends WorldObj {
+    // TODO: HEALTH BAR POSITIONING IS WRONG
     constructor(max_health, pos, rot, scale) {
         super(pos, rot, scale);
-        this.health_bar = new HealthBar(1, this.pos.add(new Vector2(0, 1)), this.scale);
+        this.health_bar = new HealthBar(this, 1, new Vector2(0, 10), new Vector2(20, 8));
         this.max_health = max_health;
         this.health = max_health;
         this.polygon.points = [
@@ -206,8 +243,8 @@ class Drone extends WorldObj {
         ];
     }
     draw() {
-        this.polygon.draw(this);
-        this.health_bar.draw(this);
+        this.polygon.draw();
+        this.health_bar.draw();
     }
     // Adds change to health
     update_health(change) {
@@ -219,14 +256,18 @@ class CaptainDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(2, 2));
         this.polygon.colour = new RGB(161, 189, 255);
-        this.drone_cluster = new DroneCluster(this.pos, 10);
+        this.drone_cluster = new DroneCluster(this.pos, 50);
     }
     update() {
         super.update();
-        this.look_at(mouse_world_pos, 0.04);
+        this.look_at(mouse_world_pos, DRONE_LOOK_SPEED);
         if (this.pos != camera.pos) {
-            this.move_to(camera.pos, 0.09);
+            this.move_to(camera.pos, DRONE_MOVE_SPEED);
         }
+        if (this.drone_cluster.pos != this.pos) {
+            this.drone_cluster.move_to(this.pos, 0);
+        }
+        this.drone_cluster.update();
     }
 }
 class SoldierDrone extends Drone {
@@ -244,13 +285,43 @@ class EnemyDrone extends Drone {
 var DroneStates;
 (function (DroneStates) {
     DroneStates[DroneStates["Follow"] = 0] = "Follow";
+    DroneStates[DroneStates["Attack"] = 1] = "Attack";
 })(DroneStates || (DroneStates = {}));
 class DroneCluster extends WorldObj {
     constructor(pos, radius) {
         super(pos);
         this.drone_state = DroneStates.Follow;
+        // The order of the drones in this array cannot dramtically change or else it will lead to weird behaviour
         this.drones = [];
         this.radius = radius;
+    }
+    update_drones() {
+        for (let d = 0; d < this.drones.length; d++) {
+            this.drones[d].update();
+        }
+    }
+    follow() {
+        // Evenly spaces the drones in a ring around the center of the cluster
+        // (While looking at the center)
+        for (let d = 0; d < this.drones.length; d++) {
+            let theta = ((d * 2 * Math.PI) / this.drones.length) + this.rot * DEG_TO_RAD;
+            this.drones[d].move_to(new Vector2(this.radius * Math.cos(theta), this.radius * Math.sin(theta)).add(this.pos), DRONE_MOVE_SPEED);
+            this.drones[d].look_at(this.pos, DRONE_LOOK_SPEED);
+        }
+    }
+    attack() {
+    }
+    update() {
+        this.update_drones();
+        switch (this.drone_state) {
+            case DroneStates.Follow:
+                this.follow();
+            case DroneStates.Attack:
+                this.attack();
+        }
+        // Figure out how to make this work with animation
+        this.rot = (this.rot + delta * 0.025) % 360;
+        // console.log(this.rot)
     }
 }
 class Resource extends WorldObj {
@@ -267,31 +338,45 @@ class UI {
     draw() { }
 }
 class LinkedUI {
-    constructor(offset, size) {
+    constructor(object, offset, size) {
+        this.object = object;
         this.offset = offset;
         this.size = size;
     }
-    draw(camera, object) { }
+    draw() { }
 }
 // TODO: Draw healthbar
 class HealthBar extends LinkedUI {
-    constructor(value, pos, size) {
-        super(pos, size);
+    constructor(object, value, offset, size) {
+        super(object, offset, size);
+        this.bg_colour = new RGB(191, 191, 191);
+        this.bar_colour = new RGB(77, 255, 79);
         this.value = value;
     }
-    draw(object) {
-        if (this.value == 1) {
-            return;
-        }
-    }
-    update_pos(object) {
+    draw() {
+        let corner = new Vector2(-this.offset.x + this.object.pos.x + this.size.x * 0.5, -this.offset.y + this.object.pos.y + this.size.y * 0.5);
+        corner = this.object.polygon.transform(corner);
+        // if (this.value == 1) { return }
+        ctx.beginPath(); // Start a new path
+        ctx.fillStyle = this.bg_colour.toStr();
+        ctx.rect(corner.x, corner.y, this.size.x, this.size.y); // Add a rectangle to the current path
+        ctx.fill(); // Render the path
+        ctx.beginPath(); // Start a new path
+        ctx.fillStyle = this.bar_colour.toStr();
+        ctx.rect(corner.x, corner.y, this.size.x * (this.value / 1), this.size.y); // Add a rectangle to the current path
+        ctx.fill(); // Render the path
     }
 }
 // - Constants - //
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 const MILLI_TO_SEC = 0.001;
+const DRONE_MOVE_SPEED = 0.09;
+const DRONE_LOOK_SPEED = 0.04;
 // - Tool Functions - //
+function rand_int(min, max) {
+    return Math.floor(Math.random() * (max - min + 1) + min);
+}
 function clamp(min, max, x) {
     return Math.max(min, Math.min(x, max));
 }
@@ -400,7 +485,6 @@ class Anim {
             this.elapsed = this.duration;
             this.completed = true;
         }
-        // console.log(this.name)
         this.set_value(this.interp(this.start, this.target, this.elapsed / this.duration));
         return this.completed;
     }
@@ -479,10 +563,11 @@ let ui_objects = [];
 let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
 let enemy = new EnemyDrone(100, new Vector2(-50, 0), 0);
 function init_world() {
-    let drone_1 = new SoldierDrone(100, new Vector2(0, -50), 0);
-    captain.drone_cluster.drones.push(drone_1);
+    for (let d = 0; d < 10; d++) {
+        captain.drone_cluster.drones.push(new SoldierDrone(100, new Vector2(0, 0), 0));
+    }
     world_objects.push(captain);
-    world_objects.push(drone_1, enemy);
+    world_objects.push(enemy);
 }
 function init_input() {
     // Init keyboard input
@@ -506,21 +591,18 @@ function ready() {
     requestAnimationFrame((timestamp) => process(timestamp, true));
 }
 let unpaused = false;
-let execute = true;
+let execute = true; // TODO: MAY REMOVE LATER
 let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
+// Make the game pause when tabbing out
 function process(timestamp, unpaused) {
     return __awaiter(this, void 0, void 0, function* () {
         // Unpaused is true if the engine was just unpaused (stopped and then started again)
         delta = unpaused ? 0 : (timestamp - last_animation_frame);
         last_animation_frame = timestamp;
-        if (execute) {
+        if (execute && document.hasFocus()) {
             update_game();
             activate_inputs();
-            for (let p = 0; p < 1; p++) {
-                // The issue is that I am only transforming the points of the polygon, no of the point (I need to do that before hand)
-                enemy.polygon.point_in_polygon(captain.polygon.points[p], enemy);
-            }
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
         else {
