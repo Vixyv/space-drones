@@ -252,8 +252,7 @@ class WorldObj {
     remove() {
         let i = world_objects.indexOf(this);
         world_objects.splice(i, 1);
-    }
-    
+    }   
 }
 
 class Camera extends WorldObj {
@@ -285,17 +284,22 @@ class Drone extends WorldObj {
     health_bar = new HealthBar(this, 1, new Vector2(0, -20),new Vector2(30, 5));
     reload_current = 0; // In seconds
     reload_time = 0.2;  // In seconds
+
+    // Parent drone cluster - exists on all drones to make it simpler to add drones to clusters
+    // Drones need to be able to reference its parent cluster and with this property
+    // The cluster can assign itself as the parent cluster to the drone automatically
+    p_drone_cluster: DroneCluster | undefined; 
     
     constructor(max_health: number, pos: Vector2, rot?: number, scale?: Vector2) {
         super(pos, rot, scale)
-        this.max_health = max_health;
-        this.health = max_health;
-
         this.polygon.points = [
             new Vector2(10, 0),
             new Vector2(-5, 5),
             new Vector2(-5, -5)
         ]
+
+        this.max_health = max_health;
+        this.health = max_health;
     }
 
     draw() {
@@ -330,17 +334,33 @@ class Drone extends WorldObj {
             this.reload_current -= delta*MILLI_TO_SEC;
         }
     }
+
+    remove() {
+        super.remove();
+
+        this.health_bar.remove();
+
+        if (this.p_drone_cluster != undefined) {
+            let i = this.p_drone_cluster.drones.indexOf(this);
+            this.p_drone_cluster.drones.splice(i, 1);
+        }
+    }   
+
+    // AI for different DroneStates
+    follow() {}
+    attack() {}
 }
 
 class CaptainDrone extends Drone {
-    drone_cluster: DroneCluster;
+    c_drone_cluster: DroneCluster; // Child drone cluster
 
     constructor(max_health: number, pos: Vector2, rot?: number) {
         super(max_health, pos, rot, new Vector2(3, 3))
         this.polygon.colour = new RGB(161, 189, 255);
         this.team = ObjectTeams.Friend;
 
-        this.drone_cluster = new DroneCluster(this.pos, 75);
+        // TODO: Make the radius not hardcoded
+        this.c_drone_cluster = new DroneCluster(this.pos, 75);
     }
 
     update() {
@@ -352,8 +372,8 @@ class CaptainDrone extends Drone {
             this.move_to(camera.pos, DRONE_MOVE_SPEED);
         }
 
-        if (this.drone_cluster.pos != this.pos) {
-            this.drone_cluster.move_to(this.pos, 0);
+        if (this.c_drone_cluster.pos != this.pos) {
+            this.c_drone_cluster.move_to(this.pos, 0);
         }
     }
 }
@@ -364,6 +384,27 @@ class SoldierDrone extends Drone {
         this.polygon.colour = new RGB(232, 239, 255);
         this.team = ObjectTeams.Friend;
     }
+
+    follow() {
+        if (this.p_drone_cluster == undefined) { return }
+
+        // Evenly spaces itself in a ring around the center of the cluster
+        let drone_num = this.p_drone_cluster.drones.indexOf(this);
+
+        let theta = ((drone_num*2*Math.PI)/this.p_drone_cluster.drones.length) + this.p_drone_cluster.rot*DEG_TO_RAD;
+
+        this.move_to(
+            new Vector2(
+                this.p_drone_cluster.radius*Math.cos(theta), 
+                this.p_drone_cluster.radius*Math.sin(theta)
+            ).add(this.p_drone_cluster.pos), 
+            DRONE_MOVE_SPEED);
+        this.look_at(this.pos.add(this.pos.minus(this.p_drone_cluster.pos)), DRONE_LOOK_SPEED); // Makes all of the drones point inwards
+    }
+
+    attack() {
+        if (this.p_drone_cluster == undefined) { return }
+    }
 }
 
 class EnemyDrone extends Drone {
@@ -371,6 +412,14 @@ class EnemyDrone extends Drone {
         super(max_health, pos, rot, new Vector2(3, 3))
         this.polygon.colour = new RGB(255, 168, 150);
         this.team = ObjectTeams.Enemy;
+    }
+
+    follow() {
+        if (this.p_drone_cluster == undefined) { return }
+    }
+
+    attack() {
+        if (this.p_drone_cluster == undefined) { return }
     }
 }
 
@@ -381,6 +430,10 @@ enum DroneStates {
 
 // TODO: Other states
 // TODO: Time to implement attack mode (find target, lock on target, kill target, find new target)
+// Each drone itself will implement different AI for different states
+// For soldier drone - attack, the drones will target the closet enemy to the cursor (or maybe closest few) (changes when the target dies)
+// For enemy drone - follow, the drones will face in generally the same direction and stay within a radius of the cluster as it moves
+// For enemy drone - attack, each enemy will individually choose a random drone (priotizing soldiers over captian) until the drone dies
 class DroneCluster extends WorldObj {
     drone_state = DroneStates.Follow;
     // The order of the drones in this array cannot dramtically change or else it will lead to weird behaviour
@@ -393,35 +446,23 @@ class DroneCluster extends WorldObj {
         this.radius = radius;
     }
 
-    follow() {
-        // Evenly spaces the drones in a ring around the center of the cluster
-        // (While looking at the center)
-        for (let d=0; d<this.drones.length; d++) {
-            let theta = ((d*2*Math.PI)/this.drones.length) + this.rot*DEG_TO_RAD;
-
-            this.drones[d].move_to(
-                new Vector2(
-                    this.radius*Math.cos(theta), 
-                    this.radius*Math.sin(theta)
-                ).add(this.pos), 
-                DRONE_MOVE_SPEED);
-            this.drones[d].look_at(this.drones[d].pos.add(this.drones[d].pos.minus(this.pos)), DRONE_LOOK_SPEED); // Makes all of the drones point inwards
-        }
-    }
-
-    attack() {
-
+    // Automatically assigns the drone to the drone cluster
+    // Drones should be added through here, not with c_drone_cluster.drones.push(`drone`)
+    // Drones can be removed by using the drone.remove() method
+    add_drone(drone: Drone) {
+        drone.p_drone_cluster = this;
+        this.drones.push(drone)
     }
 
     update() {
         switch(this.drone_state) {
             case DroneStates.Follow:
-                this.follow();
+                this.drones.forEach((drone) => drone.follow());
             case DroneStates.Attack:
-                this.attack();
+                this.drones.forEach((drone) => drone.attack());
         }
 
-        // Figure out how to make this work with animation
+        // TODO: Figure out how to make this work with animation (maybe, I don't know if it realy matters)
         this.rot = (this.rot+delta*0.025)%360;
     }
 }
@@ -449,12 +490,12 @@ class Bullet extends WorldObj {
 
     // If needed, implement quad trees for efficiency (with a lot of bullets, it ~halves the fps)
     check_for_hit() {
-        for (let obj=0; obj<world_objects.length; obj++) {
-            if (world_objects[obj].team == this.target) {
-                if (this.colliding_with(world_objects[obj])) {
-                    world_objects[obj].update_health(-this.damage)
-                    this.remove();
-                }
+        let enemies = world_objects.filter((object) => object.team == ObjectTeams.Enemy)
+
+        for (let enemy=0; enemy<enemies.length; enemy++) {
+            if (this.colliding_with(enemies[enemy])) {
+                enemies[enemy].update_health(-this.damage)
+                this.remove();
             }
         }
     }
@@ -485,24 +526,29 @@ class UI {
     constructor(pos: Vector2, size: Vector2) {
         this.pos = pos;
         this.size = size;
+
+        ui_objects.push(this);
     }
 
-    update() {
-        this.draw();
+    remove() {
+        let i = ui_objects.indexOf(this);
+        ui_objects.splice(i, 1);
     }
+
+    update() { this.draw(); }
 
     draw() {}
 }
 
-class LinkedUI {
+class LinkedUI extends UI {
     object: WorldObj;
     offset: Vector2;
-    size: Vector2;
 
     constructor(object: WorldObj, offset: Vector2, size: Vector2) {
+        super(object.pos.add(offset), size)
+
         this.object = object;
         this.offset = offset;
-        this.size = size;
     }
 
     draw() {}
@@ -728,7 +774,7 @@ let mouse_buttons_p_func = [pressed_left_click, empty, empty, empty, empty]
 
 function pressed_left_click() { 
     // captain.shoot(ObjectTeams.Enemy, 10, 500, 2000); // TODO: Make range based on zoom (do the same for other things too - based on zoom)
-    captain.drone_cluster.drones.forEach((drone) => {
+    captain.c_drone_cluster.drones.forEach((drone) => {
         drone.shoot(ObjectTeams.Enemy, 10, 500, 2000)
     })
 }
@@ -850,8 +896,7 @@ let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
 
 function init_world() {
     for (let d=0; d<7; d++) {
-        let drone = new SoldierDrone(100, new Vector2(0, 0), 0);
-        captain.drone_cluster.drones.push(drone);
+        captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
     }
 
     let enemy_range = 500;
