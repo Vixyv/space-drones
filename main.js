@@ -24,6 +24,7 @@ class Vector2 {
     matrix_mult(matrix) {
         return new Vector2(this.x * matrix[0][0] + this.y * matrix[0][1], this.x * matrix[1][0] + this.y * matrix[1][1]);
     }
+    distance(vector) { return Math.sqrt((this.x + vector.x) ** 2 + (this.y + vector.y) ** 2); }
     magnitude() { return Math.sqrt(this.x ** 2 + this.y ** 2); }
     normalize() {
         let magnitude = this.magnitude();
@@ -244,8 +245,12 @@ class Drone extends WorldObj {
     constructor(max_health, pos, rot, scale) {
         super(pos, rot, scale);
         this.health_bar = new HealthBar(this, 1, new Vector2(0, -20), new Vector2(30, 5));
-        this.reload_current = 0; // In seconds
+        // Shoot settings
+        this.damage = 10;
+        this.range = 2000;
+        this.speed = 500;
         this.reload_time = 0.2; // In seconds
+        this.reload_current = 0; // In seconds
         this.polygon.points = [
             new Vector2(10, 0),
             new Vector2(-5, 5),
@@ -265,14 +270,13 @@ class Drone extends WorldObj {
         }
         this.health_bar.value = (this.health / this.max_health);
     }
-    // TODO: Maybe make these variables properties of the drone (easier to change then)
-    // TODO: Add reload time
     // Speed is in pixels per second, range how far the bullet can travel in pixels
-    shoot(target, damage, speed, range) {
+    shoot(target) {
         if (this.reload_current <= 0) {
-            // This need structuredClone() for some reason (I don't know why)
-            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, damage, range / speed);
-            bullet.move_to(this.forward.scale(range).add(this.pos), range / speed, lerp);
+            let duration = this.range / this.speed;
+            // This needs structuredClone() for some reason (I don't know why)
+            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, this.damage, duration);
+            bullet.move_to(this.forward.scale(this.range).add(this.pos), duration, lerp);
             this.reload_current = this.reload_time;
         }
     }
@@ -316,10 +320,11 @@ class CaptainDrone extends Drone {
 class SoldierDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(1.5, 1.5));
+        this.reload_time = 0.5; // In seconds
         this.polygon.colour = new RGB(232, 239, 255);
         this.team = ObjectTeams.Friend;
     }
-    follow() {
+    circle_cluster() {
         if (this.p_drone_cluster == undefined) {
             return;
         }
@@ -327,11 +332,55 @@ class SoldierDrone extends Drone {
         let drone_num = this.p_drone_cluster.drones.indexOf(this);
         let theta = ((drone_num * 2 * Math.PI) / this.p_drone_cluster.drones.length) + this.p_drone_cluster.rot * DEG_TO_RAD;
         this.move_to(new Vector2(this.p_drone_cluster.radius * Math.cos(theta), this.p_drone_cluster.radius * Math.sin(theta)).add(this.p_drone_cluster.pos), DRONE_MOVE_SPEED);
+    }
+    follow() {
+        if (this.p_drone_cluster == undefined) {
+            return;
+        }
+        this.circle_cluster();
         this.look_at(this.pos.add(this.pos.minus(this.p_drone_cluster.pos)), DRONE_LOOK_SPEED); // Makes all of the drones point inwards
     }
+    // Speed is in pixels per second, range how far the bullet can travel in pixels
+    shoot(target) {
+        if (this.reload_current <= 0) {
+            let duration = this.range / this.speed;
+            // This needs structuredClone() for some reason (I don't know why)
+            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, this.damage, duration);
+            bullet.move_to(this.forward.scale(this.range).add(this.pos), duration, lerp);
+            // Randomly offsets the drone shooting pattern by a small amount
+            this.reload_current = this.reload_time + this.reload_time * rand(-0.2, 0.4);
+        }
+        ;
+    }
+    // TODO: Implement a prediction algorithm which predicts where to look based upon current movement speed and direction (issue caused by time delay to locking on target)
     attack() {
         if (this.p_drone_cluster == undefined) {
             return;
+        }
+        this.circle_cluster();
+        let enemies = world_objects.filter((object) => object.team == ObjectTeams.Enemy);
+        if (enemies.length <= 0) {
+            this.look_at(mouse_world_pos, DRONE_LOOK_SPEED);
+            return;
+        }
+        let target = enemies[0];
+        let distance = target.pos.distance(new Vector2(0, 0).minus(mouse_world_pos));
+        for (let enemy = 1; enemy < enemies.length; enemy++) {
+            let new_distance = enemies[enemy].pos.distance(new Vector2(0, 0).minus(mouse_world_pos));
+            if (new_distance < distance) {
+                target = enemies[enemy];
+                distance = new_distance;
+            }
+        }
+        this.look_at(target.pos, DRONE_LOOK_SPEED); // If this is too slow, the drone won't be able to track fast enough when moving or when the target is moving
+        // Checks if the drone is looking at the target yet (+-epsilon)
+        const e = 0.1; // The smaller epsilon is, the closer the drone has to be looking at the center of its target to shoot
+        if (target.pos.minus(this.pos).normalize().x > this.forward.normalize().x + e ||
+            target.pos.minus(this.pos).normalize().x < this.forward.normalize().x - e ||
+            target.pos.minus(this.pos).normalize().y > this.forward.normalize().y + e ||
+            target.pos.minus(this.pos).normalize().y < this.forward.normalize().y - e) {
+            // TODO: Make property bool
+            this.reload_current = this.reload_time + this.reload_time * rand(-0.6, -0.2);
         }
     }
 }
@@ -352,14 +401,15 @@ class EnemyDrone extends Drone {
         }
     }
 }
+// TODO: Make a reason to not always stay in attack mode
 var DroneStates;
 (function (DroneStates) {
-    DroneStates[DroneStates["Follow"] = 0] = "Follow";
-    DroneStates[DroneStates["Attack"] = 1] = "Attack";
+    DroneStates["Follow"] = "Follow";
+    DroneStates["Attack"] = "Attack";
 })(DroneStates || (DroneStates = {}));
 // TODO: Other states
-// TODO: Time to implement attack mode (find target, lock on target, kill target, find new target)
 // Each drone itself will implement different AI for different states
+// For soldier drone - follow, the drones will circle the cluster
 // For soldier drone - attack, the drones will target the closet enemy to the cursor (or maybe closest few) (changes when the target dies)
 // For enemy drone - follow, the drones will face in generally the same direction and stay within a radius of the cluster as it moves
 // For enemy drone - attack, each enemy will individually choose a random drone (priotizing soldiers over captian) until the drone dies
@@ -379,11 +429,14 @@ class DroneCluster extends WorldObj {
         this.drones.push(drone);
     }
     update() {
+        // TODO: Drones immediately starting shooting if you're holding down M1 when switching modes
         switch (this.drone_state) {
             case DroneStates.Follow:
                 this.drones.forEach((drone) => drone.follow());
+                break;
             case DroneStates.Attack:
                 this.drones.forEach((drone) => drone.attack());
+                break;
         }
         // TODO: Figure out how to make this work with animation (maybe, I don't know if it realy matters)
         this.rot = (this.rot + delta * 0.025) % 360;
@@ -627,15 +680,18 @@ let mouse_buttons_i_func = [empty, empty, empty, empty, empty];
 // Functions that are called on press 
 let mouse_buttons_p_func = [pressed_left_click, empty, empty, empty, empty];
 function pressed_left_click() {
-    // captain.shoot(ObjectTeams.Enemy, 10, 500, 2000); // TODO: Make range based on zoom (do the same for other things too - based on zoom)
-    captain.c_drone_cluster.drones.forEach((drone) => {
-        drone.shoot(ObjectTeams.Enemy, 10, 500, 2000);
-    });
+    // captain.shoot(ObjectTeams.Enemy); // TODO: Make range based on zoom (do the same for other things too - based on zoom)
+    if (captain.c_drone_cluster.drone_state == DroneStates.Attack) {
+        captain.c_drone_cluster.drones.forEach((drone) => {
+            drone.shoot(ObjectTeams.Enemy);
+        });
+    }
 }
 // Keyboard
 const MOVE_SPEED = 2;
 let move_vector = new Vector2(0, 0);
 const ZOOM_FACTOR = 0.01;
+// TODO: Maybe implement toggle buttons (aka. on inital press buttons) instead of hold buttons which constant apply their action
 // Allows for multiple keys to be pressed at once
 // Derived from https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7
 const KEYBOARD_CONTROLLER = {
@@ -651,6 +707,9 @@ const KEYBOARD_CONTROLLER = {
     // Camera zoom
     "=": { pressed: false, func: () => zoom_canvas(1 + ZOOM_FACTOR) }, // Zoom in
     "-": { pressed: false, func: () => zoom_canvas(1 - ZOOM_FACTOR) }, // Zoom out
+    // Action keys
+    "e": { pressed: false, func: () => captain.c_drone_cluster.drone_state = DroneStates.Attack }, // Switch to attack mode
+    "q": { pressed: false, func: () => captain.c_drone_cluster.drone_state = DroneStates.Follow }, // Switch to follow mode
     // Why not
     "Backspace": { pressed: false, func: () => captain.remove() }
 };
@@ -729,7 +788,7 @@ let ui_objects = [];
 let camera = new Camera(new Vector2(0, 0));
 let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
 function init_world() {
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < 10; d++) {
         captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
     }
     let enemy_range = 500;
