@@ -1,3 +1,12 @@
+// Program Structure
+  // - Classes - //
+  // - Constants - //
+  // - Tool Functions - //
+  // - Animation - //
+  // - Game Manager - //
+  // - Init - //
+  // - Debug - //
+
 // - Classes - //
 // Animation classes are under // - Animation - //
 
@@ -475,6 +484,8 @@ class EnemyDrone extends Drone {
 
     follow() {
         if (this.p_drone_cluster == undefined) { return }
+
+        this.move_to(this.pos.add(this.forward.scale(0)), DRONE_MOVE_SPEED)
     }
 
     attack() {
@@ -484,8 +495,8 @@ class EnemyDrone extends Drone {
 
 // TODO: Make a reason to not always stay in attack mode
 enum DroneStates {
-    Follow = "Follow",
-    Attack = "Attack",
+    Follow,
+    Attack,
 }
 
 // TODO: Other states
@@ -601,6 +612,17 @@ class UI {
     draw() {}
 }
 
+class Button extends UI {
+    text = "";
+
+    constructor(pos: Vector2, size: Vector2, text: string) {
+        super(pos, size)
+
+        this.text = text;
+    }
+}
+
+// Is connected to a world object
 class LinkedUI extends UI {
     object: WorldObj;
     offset: Vector2;
@@ -653,6 +675,8 @@ const MILLI_TO_SEC = 0.001;
 
 const DRONE_MOVE_SPEED = 0.09;
 const DRONE_LOOK_SPEED = 0.04;
+
+const BUTTON_FONT = "normal 36px Courier New";
 
 // - Tool Functions - //
 
@@ -780,6 +804,8 @@ class Anim {
     step(): boolean {
         this.elapsed += delta*MILLI_TO_SEC;
 
+        console.log(delta);
+
         if (this.elapsed >= this.duration ) { 
             this.elapsed = this.duration;
             this.completed = true;
@@ -793,19 +819,26 @@ class Anim {
 
 // - Game Manager - //
 
-function draw_background() {
-    ctx.fillStyle = "rgb(4, 1, 51)";
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+// These variables are not in a `Game` object because there isn't really a need for it
+enum GameStates {
+    Start,
+    Play,
+    Pause,
+    End,
 }
 
-function update_game() {
-    draw_background()
+let game_state = GameStates.Start;
+let last_game_state = GameStates.Start;
 
-    // The objects manage updating themselves on their own
-    // The game just tells them when to do that
+let world_objects: WorldObj[] = [];
+let ui_objects: UI[] = [];
+
+let camera = new Camera(new Vector2(0, 0));
+
+function update_game() {
+    play_background()
+
+    // The objects manage updating themselves on their own, the game just tells them when to do that
     for (let obj=0; obj<world_objects.length; obj++) {
         world_objects[obj].update();
     }
@@ -814,6 +847,50 @@ function update_game() {
     for (let obj=0; obj<ui_objects.length; obj++) {
         ui_objects[obj].update();
     }
+}
+
+
+// Start
+function init_start() {
+
+}
+
+function start_screen() {
+
+}
+
+// Play
+let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
+let e_cluster = new DroneCluster(new Vector2(0, 0), 10);
+
+function init_play() {
+    for (let d=0; d<10; d++) {
+        captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
+    }
+
+    let enemy_range = 500;
+
+    for (let e=0; e<10; e++) {
+        e_cluster.add_drone(new EnemyDrone(100, new Vector2(rand_int(-enemy_range, enemy_range), rand_int(-enemy_range, enemy_range)), rand_int(-179, 180)));
+    }
+}
+
+function play_background() {
+    ctx.fillStyle = "rgb(4, 1, 51)";
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// Pause
+function pause_screen() {
+
+}
+
+// End
+function end_screen() {
+
 }
 
 // - Input - //
@@ -840,6 +917,16 @@ function pressed_left_click() {
         captain.c_drone_cluster.drones.forEach((drone) => {
             drone.shoot(ObjectTeams.Enemy);
         })
+    }
+}
+
+function activate_mouse_inputs() {
+    for (let press=0; press<mouse_buttons_initial.length; press++) {
+        if (mouse_buttons_initial[press]) {
+            mouse_buttons_initial[press] = false;
+            mouse_buttons_i_func[press]()
+        }
+        if (mouse_buttons_pressed[press]) { mouse_buttons_p_func[press]() }
     }
 }
 
@@ -881,17 +968,7 @@ function zoom_canvas(scale: number) {
     ctx.translate(window.innerWidth*(1-scale)/2, window.innerHeight*(1-scale)/2);
 }
 
-function activate_inputs() {
-    // Activates mouse inputs
-    for (let press=0; press<mouse_buttons_initial.length; press++) {
-        if (mouse_buttons_initial[press]) {
-            mouse_buttons_initial[press] = false;
-            mouse_buttons_i_func[press]()
-        }
-        if (mouse_buttons_pressed[press]) { mouse_buttons_p_func[press]() }
-    }
-
-    // Activates keyboard inputs
+function activate_button_inputs() {
     Object.keys(KEYBOARD_CONTROLLER).forEach(key => {
         KEYBOARD_CONTROLLER[key].pressed && KEYBOARD_CONTROLLER[key].func();
     })
@@ -955,51 +1032,52 @@ function resize_canvas() {
     canvas.height = canvas_size.y;
 }
 
-// TODO: Make a game state object which stores all of this information and more (instead of just global variables)
-let world_objects: WorldObj[] = [];
-let ui_objects: UI[] = [];
-
-let camera = new Camera(new Vector2(0, 0));
-
-let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
-
-function init_world() {
-    for (let d=0; d<10; d++) {
-        captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
-    }
-
-    let enemy_range = 500;
-
-    for (let e=0; e<10; e++) {
-        new EnemyDrone(100, new Vector2(rand_int(-enemy_range, enemy_range), rand_int(-enemy_range, enemy_range)), rand_int(-179, 180));
-    }
-}
-
-
 function ready() {
     init_canvas()
-    init_world()
     init_input()
 
     requestAnimationFrame((timestamp: DOMHighResTimeStamp) => process(timestamp, true));
 }
 
-let unpaused = false;
-let execute = true; // TODO: MAY REMOVE LATER (put into game_state object)
-
-
 let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
 // TODO: Account for the fact that you move faster if you have higher fps
+
+let unpaused = false;
 
 async function process(timestamp: DOMHighResTimeStamp, unpaused: boolean) {
     // Unpaused is true if the engine was just unpaused (stopped and then started again)
     delta = unpaused ? 0 : (timestamp - last_animation_frame);
     last_animation_frame = timestamp;
 
-    if (execute && document.hasFocus()) {
-        update_game()
-        activate_inputs()
+    if (document.hasFocus()) {
+        activate_mouse_inputs()
+
+        switch (game_state) {
+            case GameStates.Start:
+                if (last_game_state != game_state) {
+                    init_start()
+                    last_game_state = game_state;
+                }
+
+                start_screen();
+                break;
+            case GameStates.Play:
+                if (last_game_state != game_state) {
+                    init_play()
+                    last_game_state = game_state;
+                }
+
+                update_game()
+                activate_button_inputs()
+                break;
+            case GameStates.Pause:
+                pause_screen();
+                break;
+            case GameStates.End:
+                end_screen();
+                break;
+        }
 
         show_fps()
 

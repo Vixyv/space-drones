@@ -1,6 +1,12 @@
 "use strict";
+// Program Structure
 // - Classes - //
-// Animation classes are under // - Animation - //
+// - Constants - //
+// - Tool Functions - //
+// - Animation - //
+// - Game Manager - //
+// - Init - //
+// - Debug - //
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -10,6 +16,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+// - Classes - //
+// Animation classes are under // - Animation - //
 // Tool classes
 class Vector2 {
     constructor(x, y) {
@@ -394,6 +402,7 @@ class EnemyDrone extends Drone {
         if (this.p_drone_cluster == undefined) {
             return;
         }
+        this.move_to(this.pos.add(this.forward.scale(0)), DRONE_MOVE_SPEED);
     }
     attack() {
         if (this.p_drone_cluster == undefined) {
@@ -404,8 +413,8 @@ class EnemyDrone extends Drone {
 // TODO: Make a reason to not always stay in attack mode
 var DroneStates;
 (function (DroneStates) {
-    DroneStates["Follow"] = "Follow";
-    DroneStates["Attack"] = "Attack";
+    DroneStates[DroneStates["Follow"] = 0] = "Follow";
+    DroneStates[DroneStates["Attack"] = 1] = "Attack";
 })(DroneStates || (DroneStates = {}));
 // TODO: Other states
 // Each drone itself will implement different AI for different states
@@ -496,6 +505,14 @@ class UI {
     update() { this.draw(); }
     draw() { }
 }
+class Button extends UI {
+    constructor(pos, size, text) {
+        super(pos, size);
+        this.text = "";
+        this.text = text;
+    }
+}
+// Is connected to a world object
 class LinkedUI extends UI {
     constructor(object, offset, size) {
         super(object.pos.add(offset), size);
@@ -532,6 +549,7 @@ const RAD_TO_DEG = 180 / Math.PI;
 const MILLI_TO_SEC = 0.001;
 const DRONE_MOVE_SPEED = 0.09;
 const DRONE_LOOK_SPEED = 0.04;
+const BUTTON_FONT = "normal 36px Courier New";
 // - Tool Functions - //
 function rand_int(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
@@ -640,6 +658,7 @@ class Anim {
     // Step the animation forward (returns true will completed)
     step() {
         this.elapsed += delta * MILLI_TO_SEC;
+        console.log(delta);
         if (this.elapsed >= this.duration) {
             this.elapsed = this.duration;
             this.completed = true;
@@ -649,16 +668,22 @@ class Anim {
     }
 }
 // - Game Manager - //
-function draw_background() {
-    ctx.fillStyle = "rgb(4, 1, 51)";
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.beginPath();
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
+// These variables are not in a `Game` object because there isn't really a need for it
+var GameStates;
+(function (GameStates) {
+    GameStates[GameStates["Start"] = 0] = "Start";
+    GameStates[GameStates["Play"] = 1] = "Play";
+    GameStates[GameStates["Pause"] = 2] = "Pause";
+    GameStates[GameStates["End"] = 3] = "End";
+})(GameStates || (GameStates = {}));
+let game_state = GameStates.Start;
+let last_game_state = GameStates.Start;
+let world_objects = [];
+let ui_objects = [];
+let camera = new Camera(new Vector2(0, 0));
 function update_game() {
-    draw_background();
-    // The objects manage updating themselves on their own
-    // The game just tells them when to do that
+    play_background();
+    // The objects manage updating themselves on their own, the game just tells them when to do that
     for (let obj = 0; obj < world_objects.length; obj++) {
         world_objects[obj].update();
     }
@@ -666,6 +691,35 @@ function update_game() {
     for (let obj = 0; obj < ui_objects.length; obj++) {
         ui_objects[obj].update();
     }
+}
+// Start
+function init_start() {
+}
+function start_screen() {
+}
+// Play
+let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
+let e_cluster = new DroneCluster(new Vector2(0, 0), 10);
+function init_play() {
+    for (let d = 0; d < 10; d++) {
+        captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
+    }
+    let enemy_range = 500;
+    for (let e = 0; e < 10; e++) {
+        e_cluster.add_drone(new EnemyDrone(100, new Vector2(rand_int(-enemy_range, enemy_range), rand_int(-enemy_range, enemy_range)), rand_int(-179, 180)));
+    }
+}
+function play_background() {
+    ctx.fillStyle = "rgb(4, 1, 51)";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+// Pause
+function pause_screen() {
+}
+// End
+function end_screen() {
 }
 // - Input - //
 // Mouse
@@ -685,6 +739,17 @@ function pressed_left_click() {
         captain.c_drone_cluster.drones.forEach((drone) => {
             drone.shoot(ObjectTeams.Enemy);
         });
+    }
+}
+function activate_mouse_inputs() {
+    for (let press = 0; press < mouse_buttons_initial.length; press++) {
+        if (mouse_buttons_initial[press]) {
+            mouse_buttons_initial[press] = false;
+            mouse_buttons_i_func[press]();
+        }
+        if (mouse_buttons_pressed[press]) {
+            mouse_buttons_p_func[press]();
+        }
     }
 }
 // Keyboard
@@ -719,18 +784,7 @@ function zoom_canvas(scale) {
     ctx.scale(scale, scale);
     ctx.translate(window.innerWidth * (1 - scale) / 2, window.innerHeight * (1 - scale) / 2);
 }
-function activate_inputs() {
-    // Activates mouse inputs
-    for (let press = 0; press < mouse_buttons_initial.length; press++) {
-        if (mouse_buttons_initial[press]) {
-            mouse_buttons_initial[press] = false;
-            mouse_buttons_i_func[press]();
-        }
-        if (mouse_buttons_pressed[press]) {
-            mouse_buttons_p_func[press]();
-        }
-    }
-    // Activates keyboard inputs
+function activate_button_inputs() {
     Object.keys(KEYBOARD_CONTROLLER).forEach(key => {
         KEYBOARD_CONTROLLER[key].pressed && KEYBOARD_CONTROLLER[key].func();
     });
@@ -782,39 +836,45 @@ function resize_canvas() {
     canvas.width = canvas_size.x;
     canvas.height = canvas_size.y;
 }
-// TODO: Make a game state object which stores all of this information and more (instead of just global variables)
-let world_objects = [];
-let ui_objects = [];
-let camera = new Camera(new Vector2(0, 0));
-let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
-function init_world() {
-    for (let d = 0; d < 10; d++) {
-        captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
-    }
-    let enemy_range = 500;
-    for (let e = 0; e < 10; e++) {
-        new EnemyDrone(100, new Vector2(rand_int(-enemy_range, enemy_range), rand_int(-enemy_range, enemy_range)), rand_int(-179, 180));
-    }
-}
 function ready() {
     init_canvas();
-    init_world();
     init_input();
     requestAnimationFrame((timestamp) => process(timestamp, true));
 }
-let unpaused = false;
-let execute = true; // TODO: MAY REMOVE LATER (put into game_state object)
 let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
 // TODO: Account for the fact that you move faster if you have higher fps
+let unpaused = false;
 function process(timestamp, unpaused) {
     return __awaiter(this, void 0, void 0, function* () {
         // Unpaused is true if the engine was just unpaused (stopped and then started again)
         delta = unpaused ? 0 : (timestamp - last_animation_frame);
         last_animation_frame = timestamp;
-        if (execute && document.hasFocus()) {
-            update_game();
-            activate_inputs();
+        if (document.hasFocus()) {
+            activate_mouse_inputs();
+            switch (game_state) {
+                case GameStates.Start:
+                    if (last_game_state != game_state) {
+                        init_start();
+                        last_game_state = game_state;
+                    }
+                    start_screen();
+                    break;
+                case GameStates.Play:
+                    if (last_game_state != game_state) {
+                        init_play();
+                        last_game_state = game_state;
+                    }
+                    update_game();
+                    activate_button_inputs();
+                    break;
+                case GameStates.Pause:
+                    pause_screen();
+                    break;
+                case GameStates.End:
+                    end_screen();
+                    break;
+            }
             show_fps();
             requestAnimationFrame((timestamp) => process(timestamp, false));
         }
