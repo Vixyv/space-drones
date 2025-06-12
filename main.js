@@ -502,14 +502,29 @@ class UI {
         let i = ui_objects.indexOf(this);
         ui_objects.splice(i, 1);
     }
-    update() { this.draw(); }
     draw() { }
+    update() { this.draw(); }
 }
 class Button extends UI {
-    constructor(pos, size, text) {
+    constructor(pos, colour, padding, text) {
+        ctx.font = BUTTON_FONT;
+        let size = new Vector2(ctx.measureText(text).width, 40);
         super(pos, size);
         this.text = "";
+        this.colour = colour;
+        this.padding = padding;
         this.text = text;
+    }
+    center() {
+        this.pos = this.pos.minus(this.size.scale(0.5));
+    }
+    draw() {
+        ctx.font = BUTTON_FONT;
+        ctx.fillStyle = this.colour.toStr();
+        ctx.fillRect(this.pos.x, this.pos.y, this.size.x + 2 * this.padding, this.size.y);
+        // TODO: Font colour
+        ctx.fillStyle = new RGB(0, 0, 0).toStr();
+        ctx.fillText(this.text, this.pos.x + this.padding, this.pos.y + this.size.y * 0.75);
     }
 }
 // Is connected to a world object
@@ -549,7 +564,7 @@ const RAD_TO_DEG = 180 / Math.PI;
 const MILLI_TO_SEC = 0.001;
 const DRONE_MOVE_SPEED = 0.09;
 const DRONE_LOOK_SPEED = 0.04;
-const BUTTON_FONT = "normal 36px Courier New";
+const BUTTON_FONT = "bold 36px Courier New";
 // - Tool Functions - //
 function rand_int(min, max) {
     return Math.floor(Math.random() * (max - min + 1) + min);
@@ -658,7 +673,6 @@ class Anim {
     // Step the animation forward (returns true will completed)
     step() {
         this.elapsed += delta * MILLI_TO_SEC;
-        console.log(delta);
         if (this.elapsed >= this.duration) {
             this.elapsed = this.duration;
             this.completed = true;
@@ -677,7 +691,7 @@ var GameStates;
     GameStates[GameStates["End"] = 3] = "End";
 })(GameStates || (GameStates = {}));
 let game_state = GameStates.Start;
-let last_game_state = GameStates.Start;
+let last_game_state;
 let world_objects = [];
 let ui_objects = [];
 let camera = new Camera(new Vector2(0, 0));
@@ -693,14 +707,25 @@ function update_game() {
     }
 }
 // Start
+// TODO: Add floating resources in the background for asthetics
 function init_start() {
+    let start_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Start");
+    start_button.pos.y -= 50;
+    start_button.center();
+    let info_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Info");
+    info_button.pos.y += 50;
+    info_button.center();
 }
 function start_screen() {
 }
 // Play
-let captain = new CaptainDrone(100, new Vector2(0, 0), 0);
-let e_cluster = new DroneCluster(new Vector2(0, 0), 10);
+let captain;
+let e_cluster;
 function init_play() {
+    world_objects = [];
+    ui_objects = [];
+    captain = new CaptainDrone(100, new Vector2(0, 0), 0);
+    e_cluster = new DroneCluster(new Vector2(0, 0), 10);
     for (let d = 0; d < 10; d++) {
         captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
     }
@@ -858,6 +883,7 @@ function process(timestamp, unpaused) {
                         init_start();
                         last_game_state = game_state;
                     }
+                    update_game();
                     start_screen();
                     break;
                 case GameStates.Play:
