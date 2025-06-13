@@ -266,6 +266,7 @@ class WorldObj {
 }
 
 class Camera extends WorldObj {
+    // TODO: Not moving anymore
     move_vector = new Vector2(0, 0);
     get offset() { return new Vector2(canvas_size.x*0.5, canvas_size.y*0.5).minus(this.pos) };
 
@@ -628,6 +629,20 @@ class Button extends UI {
         this.text = text;
     }
 
+    // Is set when the button is created (easier if it's not a constructor paramater)
+    action() {
+        console.log("pressed me: " + this.text);
+    }
+
+    mouse_over(): boolean {
+        if (mouse_pos.x >= this.pos.x && mouse_pos.x <= this.pos.x+this.size.x &&
+            mouse_pos.y >= this.pos.y && mouse_pos.y <= this.pos.y+this.size.y) {
+            return true
+        }
+
+        return false
+    }
+
     center() {
         this.pos = this.pos.minus(this.size.scale(0.5));
     }
@@ -877,6 +892,9 @@ function init_start() {
     let start_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Start");
     start_button.pos.y -= 50;
     start_button.center();
+    start_button.action = () => {
+        game_state = GameStates.Play;
+    }
 
     let info_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Info");
     info_button.pos.y += 50;
@@ -945,12 +963,24 @@ let mouse_buttons_i_func = [empty, empty, empty, empty, empty];
 let mouse_buttons_p_func = [pressed_left_click, empty, empty, empty, empty]
 
 function pressed_left_click() { 
-    // captain.shoot(ObjectTeams.Enemy); // TODO: Make range based on zoom (do the same for other things too - based on zoom)
+    let buttons = ui_objects.filter((object) => object instanceof Button);
 
-    if (captain.c_drone_cluster.drone_state == DroneStates.Attack) {
-        captain.c_drone_cluster.drones.forEach((drone) => {
-            drone.shoot(ObjectTeams.Enemy);
-        })
+    buttons.forEach((button) => {
+        if (button.mouse_over()) {
+            button.action();
+            return // Returns if the mouse clicked a button instead of doing anything else
+        }
+    })
+
+    if (game_state == GameStates.Play) {
+        try {
+            console.log("trying")
+            console.log(captain)
+            if (captain.c_drone_cluster.drone_state == DroneStates.Attack) {
+                captain.c_drone_cluster.drones.forEach((drone) => {
+                    drone.shoot(ObjectTeams.Enemy);
+            })}
+        } catch (error) {}
     }
 }
 
@@ -1041,6 +1071,7 @@ function init_input() {
 let canvas: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
 let canvas_size = new Vector2(window.innerWidth, window.innerHeight);
+let mouse_pos = new Vector2(0, 0);
 let mouse_world_pos = new Vector2(0, 0);
 window.onresize = resize_canvas;
 
@@ -1051,6 +1082,7 @@ function init_canvas() {
     resize_canvas()
 
     canvas.addEventListener('mousemove', (event) => {
+        mouse_pos = new Vector2(event.clientX, event.clientY);
         mouse_world_pos = mouse_to_world(event);
     });
 }
