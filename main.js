@@ -236,7 +236,6 @@ class Camera extends WorldObj {
     ;
     constructor(pos) {
         super(pos);
-        // TODO: Not moving anymore
         this.move_vector = new Vector2(0, 0);
     }
     move() {
@@ -276,9 +275,12 @@ class Drone extends WorldObj {
         this.health += change;
         if (this.health <= 0) {
             this.remove();
+            this.on_death();
         }
         this.health_bar.value = (this.health / this.max_health);
     }
+    // Called when the object dies
+    on_death() { }
     // Speed is in pixels per second, range how far the bullet can travel in pixels
     shoot(target) {
         if (this.reload_current <= 0) {
@@ -307,13 +309,18 @@ class Drone extends WorldObj {
     follow() { }
     attack() { }
 }
+// TODO: Add passive healing
 class CaptainDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(3, 3));
         this.polygon.colour = new RGB(161, 189, 255);
         this.team = ObjectTeams.Friend;
-        // TODO: Make the radius not hardcoded
         this.c_drone_cluster = new DroneCluster(this.pos, 75);
+    }
+    on_death() {
+        if (this.health <= 0) {
+            game_state = GameStates.End;
+        }
     }
     update() {
         super.update();
@@ -367,7 +374,7 @@ class SoldierDrone extends Drone {
             return;
         }
         this.circle_cluster();
-        let enemies = world_objects.filter((object) => object.team == ObjectTeams.Enemy);
+        let enemies = world_objects.filter((object) => object instanceof EnemyDrone);
         if (enemies.length <= 0) {
             this.look_at(mouse_world_pos, DRONE_LOOK_SPEED);
             return;
@@ -388,7 +395,6 @@ class SoldierDrone extends Drone {
             target.pos.minus(this.pos).normalize().x < this.forward.normalize().x - e ||
             target.pos.minus(this.pos).normalize().y > this.forward.normalize().y + e ||
             target.pos.minus(this.pos).normalize().y < this.forward.normalize().y - e) {
-            // TODO: Make property bool
             this.reload_current = this.reload_time + this.reload_time * rand(-0.6, -0.2);
         }
     }
@@ -396,6 +402,10 @@ class SoldierDrone extends Drone {
 class EnemyDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(3, 3));
+        this.reload_time = 0.5;
+        this.damage = 10;
+        this.range = 2000;
+        this.speed = 250;
         this.polygon.colour = new RGB(255, 168, 150);
         this.team = ObjectTeams.Enemy;
     }
@@ -409,9 +419,61 @@ class EnemyDrone extends Drone {
         if (this.p_drone_cluster == undefined) {
             return;
         }
+        if (this.target != undefined) {
+            this.look_at(this.target.pos, DRONE_LOOK_SPEED); // If this is too slow, the drone won't be able to track fast enough when moving or when the target is moving
+            // Checks if the drone is looking at the target yet (+-epsilon)
+            const e = 0.1; // The smaller epsilon is, the closer the drone has to be looking at the center of its target to shoot
+            if (this.target.pos.minus(this.pos).normalize().x > this.forward.normalize().x + e ||
+                this.target.pos.minus(this.pos).normalize().x < this.forward.normalize().x - e ||
+                this.target.pos.minus(this.pos).normalize().y > this.forward.normalize().y + e ||
+                this.target.pos.minus(this.pos).normalize().y < this.forward.normalize().y - e) {
+                this.reload_current = this.reload_time + this.reload_time * rand(-0.6, -0.2);
+            }
+            this.shoot(ObjectTeams.Friend);
+            if (this.target.health <= 0) {
+                this.target = undefined;
+            }
+        }
+        else {
+            this.find_new_target();
+        }
+    }
+    find_new_target() {
+        let nearest_drone = captain;
+        if (captain.c_drone_cluster.drones.length > 0) {
+            nearest_drone = captain.c_drone_cluster.drones[0];
+            let distance = captain.c_drone_cluster.drones[0].pos.distance(this.pos);
+            for (let d = 1; d < captain.c_drone_cluster.drones.length; d++) {
+                let new_distance = captain.c_drone_cluster.drones[d].pos.distance(this.pos);
+                if (new_distance < distance) {
+                    distance = new_distance;
+                }
+            }
+            let nearest_drone_index = captain.c_drone_cluster.drones.indexOf(nearest_drone);
+            // Sets the drone target to a drone near the nearest drone (so that not all enemies focus the same target)
+            nearest_drone = captain.c_drone_cluster.drones[(nearest_drone_index + rand_int(-2, 2)) % captain.c_drone_cluster.drones.length];
+        }
+        this.target = nearest_drone;
+    }
+    // TODO: Enemy drones only shoot bullets a very short distance
+    // Speed is in pixels per second, range how far the bullet can travel in pixels
+    shoot(target) {
+        if (this.reload_current <= 0) {
+            let duration = this.range / this.speed;
+            // This needs structuredClone() for some reason (I don't know why)
+            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, this.damage, duration);
+            bullet.move_to(this.forward.scale(this.range).add(this.pos), duration, lerp);
+            // Randomly offsets the drone shooting pattern by a small amount
+            this.reload_current = this.reload_time + this.reload_time * rand(-0.2, 0.4);
+        }
     }
 }
 // TODO: Make a reason to not always stay in attack mode
+//   Regarding this, when in attack mode, the drones deplete the resources of the captain
+//   If the captain has no more resources, the drones won't shoot
+//   Instead, the captain will have to shoot by themselves to get resources and kill enemies
+//   Resources can either be used to enter attack mode or build more drones (the more drones you have, the faster you deplete your resources)
+//     To make the game more interesting, the game has a spawn scale factor (for enimies and resources) which increases as game time goes on and as more drones are made
 var DroneStates;
 (function (DroneStates) {
     DroneStates[DroneStates["Follow"] = 0] = "Follow";
@@ -426,7 +488,7 @@ var DroneStates;
 class DroneCluster extends WorldObj {
     constructor(pos, radius) {
         super(pos);
-        this.drone_state = DroneStates.Follow;
+        this.drone_state = DroneStates.Attack;
         // The order of the drones in this array cannot dramtically change or else it will lead to weird behaviour
         this.drones = [];
         this.radius = radius;
@@ -468,12 +530,13 @@ class Bullet extends WorldObj {
         this.damage = damage;
         this.max_time_alive = max_time_alive;
     }
+    // TODO: Checks for team, but not class (class may be better)
     // If needed, implement quad trees for efficiency (with a lot of bullets, it ~halves the fps)
     check_for_hit() {
-        let enemies = world_objects.filter((object) => object.team == ObjectTeams.Enemy);
-        for (let enemy = 0; enemy < enemies.length; enemy++) {
-            if (this.colliding_with(enemies[enemy])) {
-                enemies[enemy].update_health(-this.damage);
+        let targets = world_objects.filter((object) => object.team == this.target);
+        for (let t = 0; t < targets.length; t++) {
+            if (this.colliding_with(targets[t])) {
+                targets[t].update_health(-this.damage);
                 this.remove();
             }
         }
@@ -534,7 +597,7 @@ class Button extends UI {
         ctx.font = BUTTON_FONT;
         ctx.fillStyle = this.colour.toStr();
         ctx.fillRect(this.pos.x, this.pos.y, this.size.x + 2 * this.padding, this.size.y);
-        // TODO: Font colour
+        // TODO: Font colour (if needed)
         ctx.fillStyle = new RGB(0, 0, 0).toStr();
         ctx.fillText(this.text, this.pos.x + this.padding, this.pos.y + this.size.y * 0.75);
     }
@@ -638,8 +701,6 @@ function vectors_intersect(v1_i, v1_f, v2_i, v2_f) {
     return true;
 }
 // - Animation - //
-// TODO: Can't have multiple movement animations at once (last added animation is the one that is run) (modifying different values)
-// TODO: Can have movement and rotation animations at the same time however (reference issue?)
 class Animator {
     constructor() {
         this.active_anims = [];
@@ -737,11 +798,11 @@ function start_screen() {
 let captain;
 let e_cluster;
 function init_play() {
-    world_objects = [];
+    world_objects = [camera];
     ui_objects = [];
     captain = new CaptainDrone(100, new Vector2(0, 0), 0);
     e_cluster = new DroneCluster(new Vector2(0, 0), 10);
-    for (let d = 0; d < 10; d++) {
+    for (let d = 0; d < 100; d++) {
         captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
     }
     let enemy_range = 500;
@@ -760,10 +821,10 @@ function pause_screen() {
 }
 // End
 function end_screen() {
+    console.log("Game over");
 }
 // - Input - //
 // Mouse
-// TODO: Add UI Button functionality for settings and otherwise (ALSO MAKE THIS CODE CLEANER/BETTER)
 // 0: Main button, 1: Auxiliary button, 2: Secondary button, 3: Fourth button, 4: Fifth button
 // (https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button)
 let mouse_buttons_initial = [false, false, false, false, false]; // Only true after a button is intially pressed, false if not pressed or sustained
@@ -783,8 +844,6 @@ function pressed_left_click() {
     });
     if (game_state == GameStates.Play) {
         try {
-            console.log("trying");
-            console.log(captain);
             if (captain.c_drone_cluster.drone_state == DroneStates.Attack) {
                 captain.c_drone_cluster.drones.forEach((drone) => {
                     drone.shoot(ObjectTeams.Enemy);
