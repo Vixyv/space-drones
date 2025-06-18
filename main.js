@@ -331,6 +331,7 @@ class CaptainDrone extends Drone {
         if (this.c_drone_cluster.pos != this.pos) {
             this.c_drone_cluster.move_to(this.pos, 0);
         }
+        this.c_drone_cluster.spin();
     }
 }
 class SoldierDrone extends Drone {
@@ -406,6 +407,7 @@ class EnemyDrone extends Drone {
         this.damage = 10;
         this.range = 2000;
         this.speed = 250;
+        this.cluster_pos_offset = new Vector2(0, 0);
         this.polygon.colour = new RGB(255, 168, 150);
         this.team = ObjectTeams.Enemy;
     }
@@ -413,7 +415,26 @@ class EnemyDrone extends Drone {
         if (this.p_drone_cluster == undefined) {
             return;
         }
-        this.move_to(this.pos.add(this.forward.scale(0)), DRONE_MOVE_SPEED);
+        if (this.cluster_pos_offset.x == 0 && this.cluster_pos_offset.y == 0) {
+            let colliding = true;
+            // Keeps generating different offsets until the drone is not intersecting with another drone
+            while (colliding) {
+                this.cluster_pos_offset = new Vector2(rand(-this.p_drone_cluster.radius, this.p_drone_cluster.radius), rand(-this.p_drone_cluster.radius, this.p_drone_cluster.radius));
+                this.pos = this.p_drone_cluster.pos.add(this.cluster_pos_offset);
+                colliding = false;
+                let enemies = world_objects.filter((object) => object instanceof EnemyDrone);
+                enemies.splice(enemies.indexOf(this), 1);
+                console.log(enemies);
+                enemies.forEach((enemy) => {
+                    // TODO: Collision detection not working
+                    console.log(this.colliding_with(enemy));
+                    if (this.colliding_with(enemy)) {
+                        colliding = true;
+                    }
+                });
+            }
+        }
+        this.move_to(this.p_drone_cluster.pos.add(this.cluster_pos_offset), DRONE_MOVE_SPEED);
     }
     attack() {
         if (this.p_drone_cluster == undefined) {
@@ -488,10 +509,16 @@ var DroneStates;
 class DroneCluster extends WorldObj {
     constructor(pos, radius) {
         super(pos);
-        this.drone_state = DroneStates.Attack;
+        this.drone_state = DroneStates.Follow;
         // The order of the drones in this array cannot dramtically change or else it will lead to weird behaviour
         this.drones = [];
         this.radius = radius;
+    }
+    meander() {
+    }
+    spin() {
+        // TODO: Figure out how to make this work with animation (maybe, I don't know if it realy matters)
+        this.rot = (this.rot + delta * 0.025) % 360;
     }
     // Automatically assigns the drone to the drone cluster
     // Drones should be added through here, not with c_drone_cluster.drones.push(`drone`)
@@ -510,8 +537,6 @@ class DroneCluster extends WorldObj {
                 this.drones.forEach((drone) => drone.attack());
                 break;
         }
-        // TODO: Figure out how to make this work with animation (maybe, I don't know if it realy matters)
-        this.rot = (this.rot + delta * 0.025) % 360;
     }
 }
 class Bullet extends WorldObj {
@@ -800,14 +825,13 @@ let e_cluster;
 function init_play() {
     world_objects = [camera];
     ui_objects = [];
-    captain = new CaptainDrone(100, new Vector2(0, 0), 0);
-    e_cluster = new DroneCluster(new Vector2(0, 0), 10);
-    for (let d = 0; d < 100; d++) {
+    captain = new CaptainDrone(1000, new Vector2(0, 0), 0);
+    e_cluster = new DroneCluster(new Vector2(0, 0), 100);
+    for (let d = 0; d < 10; d++) {
         captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
     }
-    let enemy_range = 500;
-    for (let e = 0; e < 10; e++) {
-        e_cluster.add_drone(new EnemyDrone(100, new Vector2(rand_int(-enemy_range, enemy_range), rand_int(-enemy_range, enemy_range)), rand_int(-179, 180)));
+    for (let e = 0; e < 5; e++) {
+        e_cluster.add_drone(new EnemyDrone(100, new Vector2(0, 0), rand(-179, 180)));
     }
 }
 function play_background() {
