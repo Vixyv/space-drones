@@ -7,15 +7,6 @@
 // - Game Manager - //
 // - Init - //
 // - Debug - //
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 // - Classes - //
 // Animation classes are under // - Animation - //
 // Tool classes
@@ -55,7 +46,7 @@ class RGB {
 // World object classes
 class Polygon {
     constructor(object, points, colour) {
-        this.t_points = []; // Array of transformed points
+        this.t_points = []; // List of transformed points
         this.object = object;
         this.points = points;
         this.colour = colour;
@@ -187,7 +178,6 @@ class WorldObj {
         }
         this.animator.add_anim(new Anim((value) => { this.rot = value; }, "look_at", this.rot, desired_rot, duration, interp));
     }
-    // TODO: I don't think this works (but I don't know if I need it)
     rotate_by(rotation, duration, interp) {
         this.animator.add_anim(new Anim((value) => { this.rot = value; }, "rotate_by", this.rot, this.rot + rotation, duration, interp));
     }
@@ -196,17 +186,6 @@ class WorldObj {
         interp = interp == undefined ? smoothstep : interp;
         this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_to_y", this.pos.y, pos.y, duration, interp));
         this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_to_x", this.pos.x, pos.x, duration, interp));
-    }
-    // Moves by some vector
-    move_by(pos, duration, interp) {
-        interp = interp == undefined ? smoothstep : interp;
-        let target_pos = this.pos.add(pos);
-        if (pos.y != 0) {
-            this.animator.add_anim(new Anim((value) => { this.pos.y = value; }, "move_by_y", this.pos.y, target_pos.y, duration, interp));
-        }
-        if (pos.x != 0) {
-            this.animator.add_anim(new Anim((value) => { this.pos.x = value; }, "move_by_x", this.pos.x, target_pos.x, duration, interp));
-        }
     }
     colliding_with(object) {
         // Checks if a side (vector) of `object` is in this object
@@ -255,7 +234,7 @@ class Drone extends WorldObj {
         this.health_bar = new HealthBar(this, 1, new Vector2(0, -20), new Vector2(30, 5));
         // Shoot settings
         this.damage = 10;
-        this.range = 2000;
+        this.range = attack_range + 100;
         this.speed = 500;
         this.reload_time = 0.2; // In seconds
         this.reload_current = 0; // In seconds
@@ -286,7 +265,7 @@ class Drone extends WorldObj {
         if (this.reload_current <= 0) {
             let duration = this.range / this.speed;
             // This needs structuredClone() for some reason (I don't know why)
-            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, this.damage, duration);
+            let bullet = new Bullet(structuredClone(this.pos), this.rot, ObjectTeams.None, target, this.damage, duration);
             bullet.move_to(this.forward.scale(this.range).add(this.pos), duration, lerp);
             this.reload_current = this.reload_time;
         }
@@ -309,7 +288,6 @@ class Drone extends WorldObj {
     follow() { }
     attack() { }
 }
-// TODO: Add passive healing
 class CaptainDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(3, 3));
@@ -331,13 +309,12 @@ class CaptainDrone extends Drone {
         if (this.c_drone_cluster.pos != this.pos) {
             this.c_drone_cluster.move_to(this.pos, 0);
         }
-        this.c_drone_cluster.spin();
     }
 }
 class SoldierDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(1.5, 1.5));
-        this.reload_time = 0.5; // In seconds
+        this.reload_time = 0.3; // In seconds
         this.polygon.colour = new RGB(232, 239, 255);
         this.team = ObjectTeams.Friend;
     }
@@ -345,10 +322,27 @@ class SoldierDrone extends Drone {
         if (this.p_drone_cluster == undefined) {
             return;
         }
-        // Evenly spaces itself in a ring around the center of the cluster
-        let drone_num = this.p_drone_cluster.drones.indexOf(this);
-        let theta = ((drone_num * 2 * Math.PI) / this.p_drone_cluster.drones.length) + this.p_drone_cluster.rot * DEG_TO_RAD;
-        this.move_to(new Vector2(this.p_drone_cluster.radius * Math.cos(theta), this.p_drone_cluster.radius * Math.sin(theta)).add(this.p_drone_cluster.pos), DRONE_MOVE_SPEED);
+        let drone_index = this.p_drone_cluster.drones.indexOf(this);
+        let drones_remaining = this.p_drone_cluster.drones.length;
+        let drones_on_layer = 0;
+        let layer = 0;
+        let layer_capacity = 0;
+        let layers_remaining = true;
+        // Calculates which layer the drone is on
+        while (layers_remaining) {
+            layer_capacity = this.p_drone_cluster.layer_amount + layer * this.p_drone_cluster.layer_extra;
+            if (drone_index >= layer_capacity) {
+                drone_index -= layer_capacity;
+                drones_remaining -= layer_capacity;
+                layer += 1;
+            }
+            else {
+                layers_remaining = false;
+                drones_on_layer = Math.min(drones_remaining, layer_capacity) - 1;
+            }
+        }
+        let theta = ((drone_index * 2 * Math.PI) / (1 + (drones_on_layer % layer_capacity))) + this.p_drone_cluster.rot * DEG_TO_RAD; // ((layer+1)/(layer*1.1)) - slows down the high the layer
+        this.move_to(new Vector2((this.p_drone_cluster.radius + 0.5 * this.p_drone_cluster.radius * layer) * Math.cos(theta), (this.p_drone_cluster.radius + 0.5 * this.p_drone_cluster.radius * layer) * Math.sin(theta)).add(this.p_drone_cluster.pos), DRONE_MOVE_SPEED);
     }
     follow() {
         if (this.p_drone_cluster == undefined) {
@@ -362,84 +356,84 @@ class SoldierDrone extends Drone {
         if (this.reload_current <= 0) {
             let duration = this.range / this.speed;
             // This needs structuredClone() for some reason (I don't know why)
-            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, this.damage, duration);
+            let bullet = new Bullet(structuredClone(this.pos), this.rot, ObjectTeams.None, target, this.damage, duration);
             bullet.move_to(this.forward.scale(this.range).add(this.pos), duration, lerp);
             // Randomly offsets the drone shooting pattern by a small amount
             this.reload_current = this.reload_time + this.reload_time * rand(-0.2, 0.4);
         }
         ;
     }
-    // TODO: Implement a prediction algorithm which predicts where to look based upon current movement speed and direction (issue caused by time delay to locking on target)
     attack() {
         if (this.p_drone_cluster == undefined) {
             return;
         }
         this.circle_cluster();
-        let enemies = world_objects.filter((object) => object instanceof EnemyDrone);
-        if (enemies.length <= 0) {
-            this.look_at(mouse_world_pos, DRONE_LOOK_SPEED);
-            return;
-        }
-        let target = enemies[0];
-        let distance = target.pos.distance(new Vector2(0, 0).minus(mouse_world_pos));
-        for (let enemy = 1; enemy < enemies.length; enemy++) {
-            let new_distance = enemies[enemy].pos.distance(new Vector2(0, 0).minus(mouse_world_pos));
-            if (new_distance < distance) {
-                target = enemies[enemy];
-                distance = new_distance;
-            }
-        }
-        this.look_at(target.pos, DRONE_LOOK_SPEED); // If this is too slow, the drone won't be able to track fast enough when moving or when the target is moving
-        // Checks if the drone is looking at the target yet (+-epsilon)
-        const e = 0.1; // The smaller epsilon is, the closer the drone has to be looking at the center of its target to shoot
-        if (target.pos.minus(this.pos).normalize().x > this.forward.normalize().x + e ||
-            target.pos.minus(this.pos).normalize().x < this.forward.normalize().x - e ||
-            target.pos.minus(this.pos).normalize().y > this.forward.normalize().y + e ||
-            target.pos.minus(this.pos).normalize().y < this.forward.normalize().y - e) {
-            this.reload_current = this.reload_time + this.reload_time * rand(-0.6, -0.2);
-        }
+        this.look_at(mouse_world_pos, DRONE_LOOK_SPEED);
+        // Old code used to target drones at a specific enemy (didn't work when the enemies were moving and not worth it to implement prediction)
+        // let enemies = world_objects.filter((object) => object instanceof EnemyDrone);
+        // if (enemies.length <= 0) { 
+        //     this.look_at(mouse_world_pos, DRONE_LOOK_SPEED);
+        //     return
+        // }
+        // let target = enemies[0];
+        // let distance = target.pos.distance(new Vector2(0, 0).minus(mouse_world_pos));
+        // for (let enemy=1; enemy<enemies.length; enemy++) {
+        //     let new_distance = enemies[enemy].pos.distance(new Vector2(0, 0).minus(mouse_world_pos));
+        //     if (new_distance < distance) {
+        //         target = enemies[enemy];
+        //         distance = new_distance;
+        //     }
+        // }
+        // this.look_at(target.pos, DRONE_LOOK_SPEED); // If this is too slow, the drone won't be able to track fast enough when moving or when the target is moving
+        // // Checks if the drone is looking at the target yet (+-epsilon)
+        // const e = 0.1; // The smaller epsilon is, the closer the drone has to be looking at the center of its target to shoot
+        // if (target.pos.minus(this.pos).normalize().x > this.forward.normalize().x + e ||
+        //     target.pos.minus(this.pos).normalize().x < this.forward.normalize().x - e ||
+        //     target.pos.minus(this.pos).normalize().y > this.forward.normalize().y + e ||
+        //     target.pos.minus(this.pos).normalize().y < this.forward.normalize().y - e) {
+        //     this.reload_current = this.reload_time + this.reload_time*rand(-0.6, -0.2);
+        // }
     }
 }
 class EnemyDrone extends Drone {
     constructor(max_health, pos, rot) {
         super(max_health, pos, rot, new Vector2(3, 3));
-        this.reload_time = 0.5;
-        this.damage = 10;
-        this.range = 2000;
-        this.speed = 250;
+        this.reload_time = 0.5 - captain.c_drone_cluster.drones.length / 80;
+        this.damage = 10 + captain.c_drone_cluster.drones.length * 10;
         this.cluster_pos_offset = new Vector2(0, 0);
         this.polygon.colour = new RGB(255, 168, 150);
         this.team = ObjectTeams.Enemy;
+    }
+    on_death() {
+        score += 10;
+        if (this.p_drone_cluster != undefined) {
+            if (this.p_drone_cluster.drones.length == 0) {
+                e_clusters.splice(e_clusters.indexOf(this.p_drone_cluster), 1);
+                this.p_drone_cluster.remove();
+            }
+        }
+    }
+    circle_cluster() {
+        if (this.p_drone_cluster == undefined) {
+            return;
+        }
+        // Evenly spaces itself in a ring around the center of the cluster
+        let drone_num = this.p_drone_cluster.drones.indexOf(this);
+        let theta = ((drone_num * 2 * Math.PI) / this.p_drone_cluster.drones.length);
+        this.move_to(new Vector2(this.p_drone_cluster.radius * Math.cos(theta), this.p_drone_cluster.radius * Math.sin(theta)).add(this.p_drone_cluster.pos), DRONE_MOVE_SPEED);
     }
     follow() {
         if (this.p_drone_cluster == undefined) {
             return;
         }
-        if (this.cluster_pos_offset.x == 0 && this.cluster_pos_offset.y == 0) {
-            let colliding = true;
-            // Keeps generating different offsets until the drone is not intersecting with another drone
-            while (colliding) {
-                this.cluster_pos_offset = new Vector2(rand(-this.p_drone_cluster.radius, this.p_drone_cluster.radius), rand(-this.p_drone_cluster.radius, this.p_drone_cluster.radius));
-                this.pos = this.p_drone_cluster.pos.add(this.cluster_pos_offset);
-                colliding = false;
-                let enemies = world_objects.filter((object) => object instanceof EnemyDrone);
-                enemies.splice(enemies.indexOf(this), 1);
-                console.log(enemies);
-                enemies.forEach((enemy) => {
-                    // TODO: Collision detection not working
-                    console.log(this.colliding_with(enemy));
-                    if (this.colliding_with(enemy)) {
-                        colliding = true;
-                    }
-                });
-            }
-        }
-        this.move_to(this.p_drone_cluster.pos.add(this.cluster_pos_offset), DRONE_MOVE_SPEED);
+        this.circle_cluster();
+        this.rot = this.p_drone_cluster.rot;
     }
     attack() {
         if (this.p_drone_cluster == undefined) {
             return;
         }
+        this.circle_cluster();
         if (this.target != undefined) {
             this.look_at(this.target.pos, DRONE_LOOK_SPEED); // If this is too slow, the drone won't be able to track fast enough when moving or when the target is moving
             // Checks if the drone is looking at the target yet (+-epsilon)
@@ -450,7 +444,7 @@ class EnemyDrone extends Drone {
                 this.target.pos.minus(this.pos).normalize().y < this.forward.normalize().y - e) {
                 this.reload_current = this.reload_time + this.reload_time * rand(-0.6, -0.2);
             }
-            this.shoot(ObjectTeams.Friend);
+            this.shoot([ObjectTeams.Friend]);
             if (this.target.health <= 0) {
                 this.target = undefined;
             }
@@ -476,49 +470,73 @@ class EnemyDrone extends Drone {
         }
         this.target = nearest_drone;
     }
-    // TODO: Enemy drones only shoot bullets a very short distance
     // Speed is in pixels per second, range how far the bullet can travel in pixels
     shoot(target) {
         if (this.reload_current <= 0) {
             let duration = this.range / this.speed;
             // This needs structuredClone() for some reason (I don't know why)
-            let bullet = new Bullet(structuredClone(this.pos), this.rot, this.team, target, this.damage, duration);
+            let bullet = new Bullet(structuredClone(this.pos), this.rot, ObjectTeams.None, target, this.damage, duration);
             bullet.move_to(this.forward.scale(this.range).add(this.pos), duration, lerp);
             // Randomly offsets the drone shooting pattern by a small amount
             this.reload_current = this.reload_time + this.reload_time * rand(-0.2, 0.4);
         }
     }
 }
-// TODO: Make a reason to not always stay in attack mode
-//   Regarding this, when in attack mode, the drones deplete the resources of the captain
-//   If the captain has no more resources, the drones won't shoot
-//   Instead, the captain will have to shoot by themselves to get resources and kill enemies
-//   Resources can either be used to enter attack mode or build more drones (the more drones you have, the faster you deplete your resources)
-//     To make the game more interesting, the game has a spawn scale factor (for enimies and resources) which increases as game time goes on and as more drones are made
 var DroneStates;
 (function (DroneStates) {
     DroneStates[DroneStates["Follow"] = 0] = "Follow";
     DroneStates[DroneStates["Attack"] = 1] = "Attack";
 })(DroneStates || (DroneStates = {}));
-// TODO: Other states
-// Each drone itself will implement different AI for different states
-// For soldier drone - follow, the drones will circle the cluster
-// For soldier drone - attack, the drones will target the closet enemy to the cursor (or maybe closest few) (changes when the target dies)
-// For enemy drone - follow, the drones will face in generally the same direction and stay within a radius of the cluster as it moves
-// For enemy drone - attack, each enemy will individually choose a random drone (priotizing soldiers over captian) until the drone dies
+var ClusterMovement;
+(function (ClusterMovement) {
+    ClusterMovement[ClusterMovement["None"] = 0] = "None";
+    ClusterMovement[ClusterMovement["Spin"] = 1] = "Spin";
+    ClusterMovement[ClusterMovement["Meander"] = 2] = "Meander";
+    ClusterMovement[ClusterMovement["Target"] = 3] = "Target";
+})(ClusterMovement || (ClusterMovement = {}));
 class DroneCluster extends WorldObj {
     constructor(pos, radius) {
         super(pos);
         this.drone_state = DroneStates.Follow;
         // The order of the drones in this array cannot dramtically change or else it will lead to weird behaviour
         this.drones = [];
+        this.layer_amount = 12;
+        this.layer_extra = 3;
+        this.cluster_movement = ClusterMovement.None;
+        this.turning = "right"; // Direction the cluster is turning
+        this.turning_timer = 2; // How often the cluster changes direction
+        this.turning_current = 0;
+        this.turning_base = 40; // Base turning speed
+        this.turning_speed = 50;
         this.radius = radius;
     }
     meander() {
+        if (this.turning_current <= 0) {
+            if (rand_int(0, 1) == 0) {
+                this.turning = "right";
+            }
+            else {
+                this.turning = "left";
+            }
+            this.turning_current = this.turning_timer + this.turning_timer * rand(0.2, 1.8);
+            this.turning_speed = this.turning_base + this.turning_base * rand(-0.5, 0.5);
+        }
+        this.turning_current -= delta * MILLI_TO_SEC;
+        if (this.turning == "right") {
+            this.rot -= this.turning_speed * delta * MILLI_TO_SEC;
+        }
+        else {
+            this.rot += this.turning_speed * delta * MILLI_TO_SEC;
+        }
+        // I don't know why this isn't working as intended (had to assign it manually)
+        // this.move_to(this.pos.add(this.forward.scale(1)), 1);
+        this.pos = this.pos.add(this.forward.scale(this.turning_speed * 2 * delta * MILLI_TO_SEC));
     }
     spin() {
-        // TODO: Figure out how to make this work with animation (maybe, I don't know if it realy matters)
         this.rot = (this.rot + delta * 0.025) % 360;
+    }
+    target() {
+        this.move_to(captain.pos, DRONE_MOVE_SPEED * 50, lerp);
     }
     // Automatically assigns the drone to the drone cluster
     // Drones should be added through here, not with c_drone_cluster.drones.push(`drone`)
@@ -528,7 +546,7 @@ class DroneCluster extends WorldObj {
         this.drones.push(drone);
     }
     update() {
-        // TODO: Drones immediately starting shooting if you're holding down M1 when switching modes
+        super.update();
         switch (this.drone_state) {
             case DroneStates.Follow:
                 this.drones.forEach((drone) => drone.follow());
@@ -537,6 +555,21 @@ class DroneCluster extends WorldObj {
                 this.drones.forEach((drone) => drone.attack());
                 break;
         }
+        switch (this.cluster_movement) {
+            case ClusterMovement.Spin:
+                this.spin();
+                break;
+            case ClusterMovement.Meander:
+                this.meander();
+                break;
+            case ClusterMovement.Target:
+                this.target();
+                break;
+        }
+    }
+    remove() {
+        this.drones.forEach((drone) => { drone.remove(); });
+        super.remove();
     }
 }
 class Bullet extends WorldObj {
@@ -555,10 +588,8 @@ class Bullet extends WorldObj {
         this.damage = damage;
         this.max_time_alive = max_time_alive;
     }
-    // TODO: Checks for team, but not class (class may be better)
-    // If needed, implement quad trees for efficiency (with a lot of bullets, it ~halves the fps)
     check_for_hit() {
-        let targets = world_objects.filter((object) => object.team == this.target);
+        let targets = world_objects.filter((object) => this.target.includes(object.team));
         for (let t = 0; t < targets.length; t++) {
             if (this.colliding_with(targets[t])) {
                 targets[t].update_health(-this.damage);
@@ -578,7 +609,34 @@ class Bullet extends WorldObj {
         }
     }
 }
+const RESOURCE_MULT = 20;
 class Resource extends WorldObj {
+    constructor(points, radius, pos, rot, scale) {
+        super(pos, rot, scale);
+        this.health_bar = new HealthBar(this, 1, new Vector2(0, -20), new Vector2(30, 5));
+        this.team = ObjectTeams.Resource;
+        let side_length = Math.sqrt(2 * (radius ** 2) - 4 * radius * Math.cos((2 * Math.PI) / points));
+        for (let p = 0; p < points; p++) {
+            let theta = ((p * 2 * Math.PI) / points);
+            // Randomly modulates the positions of the polygon points
+            this.polygon.points.push(new Vector2(Math.cos(theta) * radius + rand_int(-side_length, side_length) / 3, Math.sin(theta) * radius + rand_int(-side_length, side_length) / 3));
+        }
+        this.max_health = points * 20;
+        this.health = this.max_health;
+    }
+    update_health(change) {
+        this.health += change;
+        if (this.health <= 0) {
+            resources += RESOURCE_MULT * this.polygon.points.length;
+            this.remove();
+            this.health_bar.remove();
+        }
+        this.health_bar.value = (this.health / this.max_health);
+    }
+    draw() {
+        this.polygon.draw();
+        this.health_bar.draw();
+    }
 }
 // UI
 class UI {
@@ -594,20 +652,45 @@ class UI {
     draw() { }
     update() { this.draw(); }
 }
+// Can't use the identifier "Text"
+class Words extends UI {
+    // Only accepts changing variables as numbers
+    constructor(pos, text, variable) {
+        ctx.font = BUTTON_FONT;
+        let size = new Vector2(ctx.measureText(text).width, 40);
+        super(pos, size);
+        this.text = text;
+        this.variable = variable;
+    }
+    center() {
+        this.pos = this.pos.minus(this.size.scale(0.5));
+    }
+    draw() {
+        let text_with_var = this.text;
+        if (this.variable != undefined) {
+            text_with_var = text_with_var.replaceAll("$$", String(this.variable));
+        }
+        ctx.font = BUTTON_FONT;
+        ctx.fillStyle = new RGB(255, 255, 255).toStr();
+        ctx.fillText(text_with_var, this.pos.x, this.pos.y + this.size.y * 0.75);
+    }
+}
 class Button extends UI {
-    constructor(pos, colour, padding, text) {
+    constructor(pos, colour, padding, text, single_click) {
         ctx.font = BUTTON_FONT;
         let size = new Vector2(ctx.measureText(text).width, 40);
         super(pos, size);
         this.text = "";
+        // If true, prevents a button from being held down
+        this.single_click = false;
+        this.pressed = false;
         this.colour = colour;
         this.padding = padding;
         this.text = text;
+        this.single_click = single_click == undefined ? this.single_click : single_click;
     }
     // Is set when the button is created (easier if it's not a constructor paramater)
-    action() {
-        console.log("pressed me: " + this.text);
-    }
+    action() { }
     mouse_over() {
         if (mouse_pos.x >= this.pos.x && mouse_pos.x <= this.pos.x + this.size.x &&
             mouse_pos.y >= this.pos.y && mouse_pos.y <= this.pos.y + this.size.y) {
@@ -622,9 +705,15 @@ class Button extends UI {
         ctx.font = BUTTON_FONT;
         ctx.fillStyle = this.colour.toStr();
         ctx.fillRect(this.pos.x, this.pos.y, this.size.x + 2 * this.padding, this.size.y);
-        // TODO: Font colour (if needed)
         ctx.fillStyle = new RGB(0, 0, 0).toStr();
         ctx.fillText(this.text, this.pos.x + this.padding, this.pos.y + this.size.y * 0.75);
+    }
+    update() {
+        super.update();
+        // Only checks for left click as that is the only mouse button that can click a button
+        if (this.pressed && mouse_buttons_pressed[0] == false) {
+            this.pressed = false;
+        }
     }
 }
 // Is connected to a world object
@@ -805,34 +894,172 @@ function update_game() {
     }
 }
 // Start
-// TODO: Add floating resources in the background for asthetics
+let start_resources = [];
 function init_start() {
-    let start_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Start");
+    let start_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Start", true);
     start_button.pos.y -= 50;
     start_button.center();
     start_button.action = () => {
         game_state = GameStates.Play;
     };
-    let info_button = new Button(canvas_size.scale(0.5), new RGB(255, 255, 255), 10, "Info");
-    info_button.pos.y += 50;
-    info_button.center();
+    for (let r = 0; r < 30; r++) {
+        let resource_pos = new Vector2(rand(-canvas_size.x / 2 - 100, canvas_size.x / 2 + 400), rand(-canvas_size.y / 2 - 400, canvas_size.y / 2 + 100));
+        let resource = new Resource(rand_int(5, 8), rand_int(30, 70), resource_pos, rand(-179, 180));
+        start_resources.push(resource);
+        resource.move_to(resource.pos.add(new Vector2(-canvas_size.x - 510, canvas_size.y + 510)), resource.polygon.points.length * 4 + rand(25, 45), lerp);
+    }
 }
 function start_screen() {
+    ctx.font = "bold 80px Courier New";
+    ctx.fillStyle = new RGB(255, 255, 255).toStr();
+    ctx.fillText("Space Drones", canvas.width / 2 - ctx.measureText("Space Drones").width / 2, canvas_size.y / 4);
+    ctx.fillStyle = "rgba(70, 70, 70, 0.75)";
+    ctx.fillRect(canvas.width / 2 - ctx.measureText("Shoot asteroids to collect resources.").width / 4, 5 * canvas_size.y / 8 - 50, ctx.measureText("Shoot asteroids to collect resources.").width / 2, 220);
+    ctx.fillStyle = new RGB(255, 255, 255).toStr();
+    ctx.font = "bold 36px Courier New";
+    ctx.fillText("How to Play:", canvas.width / 2 - ctx.measureText("How to Play:").width / 2, 5 * canvas_size.y / 8);
+    ctx.fillText("Press E to enable attack mode.", canvas.width / 2 - ctx.measureText("Press E to enable attack mode.").width / 2, 5 * canvas_size.y / 8 + 40);
+    ctx.fillText("Shoot asteroids to collect resources.", canvas.width / 2 - ctx.measureText("Shoot asteroids to collect resources.").width / 2, 5 * canvas_size.y / 8 + 80);
+    ctx.fillText("Shoot enemies to increase your score.", canvas.width / 2 - ctx.measureText("Shoot enemies to increase your score.").width / 2, 5 * canvas_size.y / 8 + 120);
+    for (let r = 0; r < start_resources.length; r++) {
+        start_resources[r].rot += start_resources[r].polygon.points.length * delta * MILLI_TO_SEC;
+        if (start_resources[r].pos.x <= -canvas_size.x / 2 - 100 || start_resources[r].pos.y >= canvas_size.y / 2 + 100) {
+            start_resources[r].remove();
+            let resource_pos = new Vector2(0, 0);
+            if (rand_int(0, 1) == 0) {
+                resource_pos = new Vector2(rand(-canvas_size.x / 2 - 100, canvas_size.x / 2 + 400), rand(-canvas_size.y / 2 - 400, -canvas_size.y / 2 - 200));
+            }
+            else {
+                resource_pos = new Vector2(rand(canvas_size.x / 2 + 200, canvas_size.x / 2 + 400), rand(-canvas_size.y / 2 - 400, canvas_size.y / 2 + 100));
+            }
+            let resource = new Resource(rand_int(5, 8), rand_int(30, 70), resource_pos, rand(-179, 180));
+            start_resources.push(resource);
+            resource.move_to(resource.pos.add(new Vector2(-canvas_size.x - 510, canvas_size.y + 510)), resource.polygon.points.length * 4 + rand(25, 45), lerp);
+        }
+    }
 }
 // Play
 let captain;
-let e_cluster;
+let resources = 0; // Amount of resources
+let score = 0;
+let resource_ui;
+let score_ui;
+let drone_ui;
 function init_play() {
     world_objects = [camera];
     ui_objects = [];
-    captain = new CaptainDrone(1000, new Vector2(0, 0), 0);
-    e_cluster = new DroneCluster(new Vector2(0, 0), 100);
-    for (let d = 0; d < 10; d++) {
-        captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(0, 0), 0));
+    score = 0;
+    resources = 0;
+    captain = new CaptainDrone(100, new Vector2(0, 0), 0);
+    captain.c_drone_cluster.drones = [];
+    captain.c_drone_cluster.cluster_movement = ClusterMovement.Spin;
+    resource_ui = new Words(new Vector2(0.8 * (canvas_size.x / 2), 30), "Resources: $$", resources);
+    resource_ui.center();
+    score_ui = new Words(new Vector2(0.8 * (canvas_size.x / 2), 70), "Score: $$", score);
+    score_ui.center();
+    drone_ui = new Words(new Vector2(1.2 * (canvas_size.x / 2), 30), "Drones: $$", captain.c_drone_cluster.drones.length);
+    drone_ui.center();
+    let add_drone_button = new Button(new Vector2(1.19 * (canvas_size.x / 2), 70), new RGB(255, 255, 255), 10, "Add Drone", true);
+    add_drone_button.center();
+    add_drone_button.action = () => {
+        if (resources >= 100) {
+            captain.c_drone_cluster.add_drone(new SoldierDrone(100, new Vector2(captain.pos.x, captain.pos.y), 0));
+            resources -= 100;
+        }
+    };
+}
+let e_clusters = [];
+let resource_objects = [];
+let max_enemies = 30;
+let e_spawn_range = 2000;
+let attack_range = 650;
+let max_resources = 100;
+let r_spawn_range = 2000;
+function game_manager() {
+    resource_ui.variable = resources;
+    score_ui.variable = score;
+    drone_ui.variable = captain.c_drone_cluster.drones.length;
+    let drones_amount = captain.c_drone_cluster.drones.length;
+    // Spawns enemies
+    while (e_clusters.length < max_enemies) {
+        let cluster_pos = new Vector2(0, 0);
+        // Randomly chooses a position outside of the play area
+        if (rand_int(0, 1) == 0) {
+            if (rand_int(0, 1) == 0) {
+                cluster_pos.x = rand(camera.pos.x - (canvas_size.x / 4 + e_spawn_range), camera.pos.x - canvas_size.x / 4);
+            }
+            else {
+                cluster_pos.x = rand(camera.pos.x + canvas_size.x / 4, camera.pos.x + (canvas_size.x / 4 + e_spawn_range));
+            }
+            cluster_pos.y = rand(camera.pos.y - (canvas_size.y / 4 + e_spawn_range), camera.pos.y + (canvas_size.y / 4 + e_spawn_range));
+        }
+        else {
+            if (rand_int(0, 1) == 0) {
+                cluster_pos.y = rand(camera.pos.y - (canvas_size.y / 4 + e_spawn_range), camera.pos.y - canvas_size.y / 4);
+            }
+            else {
+                cluster_pos.y = rand(camera.pos.y + canvas_size.y / 4, camera.pos.y + (canvas_size.y / 4 + e_spawn_range));
+            }
+            cluster_pos.x = rand(camera.pos.x - (canvas_size.x / 4 + e_spawn_range), camera.pos.x + (canvas_size.x / 4 + e_spawn_range));
+        }
+        let e_cluster = new DroneCluster(cluster_pos, 75);
+        for (let c = 0; c < rand_int(3 + Math.round(drones_amount / 4), 7 + Math.round(drones_amount / 4)); c++) {
+            e_cluster.add_drone(new EnemyDrone(100 + 30 * drones_amount, new Vector2(e_cluster.pos.x, e_cluster.pos.y), rand(-179, 180)));
+        }
+        e_cluster.cluster_movement = ClusterMovement.Meander;
+        e_clusters.push(e_cluster);
     }
-    for (let e = 0; e < 5; e++) {
-        e_cluster.add_drone(new EnemyDrone(100, new Vector2(0, 0), rand(-179, 180)));
+    for (let e = 0; e < e_clusters.length; e++) {
+        // if (e_clusters[e].pos.x >= camera.pos.x+canvas_size.x ||
+        //     e_clusters[e].pos.x <= camera.pos.x-canvas_size.x ||
+        //     e_clusters[e].pos.y >= camera.pos.x+canvas_size.y ||
+        //     e_clusters[e].pos.y <= camera.pos.x-canvas_size.y) {
+        //     e_clusters[e].remove();
+        // }
+        if (e_clusters[e].pos.distance(new Vector2(0, 0).minus(captain.pos)) <= attack_range) {
+            e_clusters[e].drone_state = DroneStates.Attack;
+            e_clusters[e].cluster_movement = ClusterMovement.Target;
+        }
+        else {
+            e_clusters[e].animator.remove_anim("move_to_x");
+            e_clusters[e].animator.remove_anim("move_to_y");
+            e_clusters[e].drone_state = DroneStates.Follow;
+            e_clusters[e].cluster_movement = ClusterMovement.Meander;
+        }
     }
+    // Spawns resources
+    while (resource_objects.length < max_resources) {
+        let resource_pos = new Vector2(0, 0);
+        // Randomly chooses a position outside of the play area
+        if (rand_int(0, 1) == 0) {
+            if (rand_int(0, 1) == 0) {
+                resource_pos.x = rand(camera.pos.x - (canvas_size.x / 4 + r_spawn_range), camera.pos.x - canvas_size.x / 4);
+            }
+            else {
+                resource_pos.x = rand(camera.pos.x + canvas_size.x / 4, camera.pos.x + (canvas_size.x / 4 + r_spawn_range));
+            }
+            resource_pos.y = rand(camera.pos.y - (canvas_size.y / 4 + r_spawn_range), camera.pos.y + (canvas_size.y / 4 + r_spawn_range));
+        }
+        else {
+            if (rand_int(0, 1) == 0) {
+                resource_pos.y = rand(camera.pos.y - (canvas_size.y / 4 + r_spawn_range), camera.pos.y - canvas_size.y / 4);
+            }
+            else {
+                resource_pos.y = rand(camera.pos.y + canvas_size.y / 4, camera.pos.y + (canvas_size.y / 4 + r_spawn_range));
+            }
+            resource_pos.x = rand(camera.pos.x - (canvas_size.x / 4 + r_spawn_range), camera.pos.x + (canvas_size.x / 4 + r_spawn_range));
+        }
+        resource_objects.push(new Resource(rand_int(5, 8), rand_int(30, 70), resource_pos, rand(-179, 180)));
+    }
+    // for (let r=0; r<resource_objects.length; r++) {
+    //     if (resource_objects[r].pos.x >= camera.pos.x+canvas_size.x/4+r_spawn_range ||
+    //         resource_objects[r].pos.x <= camera.pos.x-canvas_size.x/4-r_spawn_range ||
+    //         resource_objects[r].pos.y >= camera.pos.x+canvas_size.y/4+r_spawn_range ||
+    //         resource_objects[r].pos.y <= camera.pos.x-canvas_size.y/4-r_spawn_range) {
+    //         resource_objects[r].remove();
+    //         resource_objects.splice(resource_objects.indexOf(resource_objects[r]), 1);
+    //     }
+    // }
 }
 function play_background() {
     ctx.fillStyle = "rgb(4, 1, 51)";
@@ -841,11 +1068,52 @@ function play_background() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 // Pause
+let pause_button;
+function init_pause() {
+    ctx.fillStyle = "rgba(73, 73, 73, 0.5)";
+    let vert_padding = 300;
+    let horz_padding = 600;
+    ctx.beginPath();
+    ctx.fillRect(horz_padding, vert_padding, canvas.width - 2 * horz_padding, canvas.height - 2 * vert_padding);
+    ctx.font = "bold 52px Courier New";
+    ctx.fillStyle = new RGB(255, 255, 255).toStr();
+    ctx.fillText("Game Paused", canvas.width / 2 - ctx.measureText("Game Paused").width / 2, vert_padding + 100);
+    pause_button = new Button(new Vector2(canvas.width / 2, canvas.height / 2), new RGB(255, 255, 255), 10, "Resume");
+    pause_button.center();
+    pause_button.action = () => {
+        game_state = GameStates.Play;
+        pause_button.remove();
+    };
+}
 function pause_screen() {
+    pause_button.update();
 }
 // End
+let restart_button;
+function init_end() {
+    ctx.fillStyle = "rgba(136, 0, 0, 0.5)";
+    let vert_padding = 300;
+    let horz_padding = 600;
+    ctx.beginPath();
+    ctx.fillRect(horz_padding, vert_padding, canvas.width - 2 * horz_padding, canvas.height - 2 * vert_padding);
+    ctx.font = "bold 52px Courier New";
+    ctx.fillStyle = new RGB(255, 255, 255).toStr();
+    ctx.fillText("Game Over", canvas.width / 2 - ctx.measureText("Game Over").width / 2, vert_padding + 100);
+    ctx.fillText("Score: " + score, canvas.width / 2 - ctx.measureText("Score: " + score).width / 2, vert_padding + 170);
+    restart_button = new Button(new Vector2(canvas.width / 2, canvas.height / 2), new RGB(255, 255, 255), 10, "Restart");
+    restart_button.center();
+    restart_button.action = () => {
+        game_state = GameStates.Start;
+        restart_button.remove();
+        world_objects = [];
+        ui_objects = [];
+        e_clusters = [];
+        resource_objects = [];
+        console.log("reseting");
+    };
+}
 function end_screen() {
-    console.log("Game over");
+    restart_button.update();
 }
 // - Input - //
 // Mouse
@@ -861,16 +1129,20 @@ let mouse_buttons_p_func = [pressed_left_click, empty, empty, empty, empty];
 function pressed_left_click() {
     let buttons = ui_objects.filter((object) => object instanceof Button);
     buttons.forEach((button) => {
-        if (button.mouse_over()) {
+        if (button.mouse_over() && button.pressed == false) {
             button.action();
+            if (button.single_click) {
+                button.pressed = true;
+            }
             return; // Returns if the mouse clicked a button instead of doing anything else
         }
     });
     if (game_state == GameStates.Play) {
         try {
+            captain.shoot([ObjectTeams.Enemy, ObjectTeams.Resource]);
             if (captain.c_drone_cluster.drone_state == DroneStates.Attack) {
                 captain.c_drone_cluster.drones.forEach((drone) => {
-                    drone.shoot(ObjectTeams.Enemy);
+                    drone.shoot([ObjectTeams.Enemy, ObjectTeams.Resource]);
                 });
             }
         }
@@ -892,7 +1164,6 @@ function activate_mouse_inputs() {
 const MOVE_SPEED = 2;
 let move_vector = new Vector2(0, 0);
 const ZOOM_FACTOR = 0.01;
-// TODO: Maybe implement toggle buttons (aka. on inital press buttons) instead of hold buttons which constant apply their action
 // Allows for multiple keys to be pressed at once
 // Derived from https://medium.com/@dovern42/handling-multiple-key-presses-at-once-in-vanilla-javascript-for-game-controllers-6dcacae931b7
 const KEYBOARD_CONTROLLER = {
@@ -905,21 +1176,13 @@ const KEYBOARD_CONTROLLER = {
     "a": { pressed: false, func: () => camera.move_vector.x += -1 }, // Left
     "s": { pressed: false, func: () => camera.move_vector.y += 1 }, // Down
     "d": { pressed: false, func: () => camera.move_vector.x += 1 }, // Right
-    // Camera zoom
-    "=": { pressed: false, func: () => zoom_canvas(1 + ZOOM_FACTOR) }, // Zoom in
-    "-": { pressed: false, func: () => zoom_canvas(1 - ZOOM_FACTOR) }, // Zoom out
     // Action keys
     "e": { pressed: false, func: () => captain.c_drone_cluster.drone_state = DroneStates.Attack }, // Switch to attack mode
     "q": { pressed: false, func: () => captain.c_drone_cluster.drone_state = DroneStates.Follow }, // Switch to follow mode
-    // Why not
-    "Backspace": { pressed: false, func: () => captain.remove() }
+    "Escape": { pressed: false, func: () => { if (game_state == GameStates.Play) {
+            game_state = GameStates.Pause;
+        } } }
 };
-// TODO: Doesn't work perfectly yet, but getting there (moves a little to the left after zooming in and out)
-function zoom_canvas(scale) {
-    ctx.translate(0, 0);
-    ctx.scale(scale, scale);
-    ctx.translate(window.innerWidth * (1 - scale) / 2, window.innerHeight * (1 - scale) / 2);
-}
 function activate_button_inputs() {
     Object.keys(KEYBOARD_CONTROLLER).forEach(key => {
         KEYBOARD_CONTROLLER[key].pressed && KEYBOARD_CONTROLLER[key].func();
@@ -983,44 +1246,52 @@ let last_animation_frame = 0;
 let delta = 0; // The amount of time since the last animation frame
 // TODO: Account for the fact that you move faster if you have higher fps
 let unpaused = false;
-function process(timestamp, unpaused) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // Unpaused is true if the engine was just unpaused (stopped and then started again)
-        delta = unpaused ? 0 : (timestamp - last_animation_frame);
-        last_animation_frame = timestamp;
-        if (document.hasFocus()) {
-            activate_mouse_inputs();
-            switch (game_state) {
-                case GameStates.Start:
-                    if (last_game_state != game_state) {
-                        init_start();
-                        last_game_state = game_state;
-                    }
-                    update_game();
-                    start_screen();
-                    break;
-                case GameStates.Play:
-                    if (last_game_state != game_state) {
+async function process(timestamp, unpaused) {
+    // Unpaused is true if the engine was just unpaused (stopped and then started again)
+    delta = unpaused ? 0 : (timestamp - last_animation_frame);
+    last_animation_frame = timestamp;
+    if (document.hasFocus()) {
+        activate_mouse_inputs();
+        switch (game_state) {
+            case GameStates.Start:
+                if (last_game_state != game_state) {
+                    init_start();
+                    last_game_state = game_state;
+                }
+                update_game();
+                start_screen();
+                break;
+            case GameStates.Play:
+                if (last_game_state != game_state) {
+                    if (last_game_state == GameStates.Start) {
                         init_play();
-                        last_game_state = game_state;
                     }
-                    update_game();
-                    activate_button_inputs();
-                    break;
-                case GameStates.Pause:
-                    pause_screen();
-                    break;
-                case GameStates.End:
-                    end_screen();
-                    break;
-            }
-            show_fps();
-            requestAnimationFrame((timestamp) => process(timestamp, false));
+                    last_game_state = game_state;
+                }
+                update_game();
+                game_manager();
+                activate_button_inputs();
+                break;
+            case GameStates.Pause:
+                if (last_game_state != game_state) {
+                    init_pause();
+                    last_game_state = game_state;
+                }
+                pause_screen();
+                break;
+            case GameStates.End:
+                if (last_game_state != game_state) {
+                    init_end();
+                    last_game_state = game_state;
+                }
+                end_screen();
+                break;
         }
-        else {
-            requestAnimationFrame((timestamp) => process(timestamp, true));
-        }
-    });
+        requestAnimationFrame((timestamp) => process(timestamp, false));
+    }
+    else {
+        requestAnimationFrame((timestamp) => process(timestamp, true));
+    }
 }
 // - Debug - //
 let fps = 0;
